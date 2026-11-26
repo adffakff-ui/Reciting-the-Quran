@@ -14,25 +14,24 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Node.js 20.x
+    - name: Set up Node.js 22
       uses: actions/setup-node@v4
       with:
-        node-version: '20.x'
-        # Removed cache: 'npm' to prevent missing lockfile caching errors
+        node-version: '22'
 
     - name: Set up Python 3
       uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
+        python-version: '3.11'
 
     - name: Install dependencies
-      run: npm install --legacy-peer-deps
-
-    - name: Build Web App & APK Package
-      run: npm run build:apk
+      run: npm install --legacy-peer-deps --no-audit --no-fund
 
     - name: Run type checking / linter
       run: npm run lint
+
+    - name: Build Web App & APK Package
+      run: npm run build:apk
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
