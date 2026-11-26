@@ -23,10 +23,18 @@ import {
   Pin,
   RotateCcw,
   Check,
+  Users,
+  Plus,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { APP_VERSION } from '../utils/offlineStorage';
 import { stopArabicSpeech } from '../utils/reciterPreferences';
+import {
+  UserProfile,
+  getProfileColorClasses,
+  getProfileInitial,
+  getProfileProgressSummary,
+} from '../utils/userProfiles';
 import {
   NAV_PREFERENCES_EVENT,
   NAV_SECTIONS,
@@ -43,6 +51,10 @@ interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   streak: number;
+  activeProfile: UserProfile;
+  profiles: UserProfile[];
+  onOpenProfiles: () => void;
+  onQuickSwitchProfile: (profileId: string) => void;
   onOpenAbout: () => void;
   onRequestSignOut: () => void;
 }
@@ -69,6 +81,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   streak,
+  activeProfile,
+  profiles,
+  onOpenProfiles,
+  onQuickSwitchProfile,
   onOpenAbout,
   onRequestSignOut,
 }) => {
@@ -395,9 +411,29 @@ export const Navbar: React.FC<NavbarProps> = ({
 
               <PWAInstallButton compact />
 
+              {/* Active Family Profile Quick Button (Visible on sm+ & desktop) */}
+              {(() => {
+                const profileColors = getProfileColorClasses(activeProfile.avatarColor);
+                return (
+                  <button
+                    type="button"
+                    onClick={onOpenProfiles}
+                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold whitespace-nowrap min-h-[40px] max-w-[140px] cursor-pointer transition-colors"
+                    title={`تبديل أو إدارة ملفات العائلة (${activeProfile.name})`}
+                  >
+                    <span
+                      className={`w-6 h-6 rounded-lg ${profileColors.bg} text-white text-[11px] font-bold flex items-center justify-center shrink-0`}
+                    >
+                      {getProfileInitial(activeProfile.name)}
+                    </span>
+                    <span className="truncate">{activeProfile.name}</span>
+                  </button>
+                );
+              })()}
+
               <div
                 className={`items-center gap-1 sm:gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] sm:text-xs font-bold whitespace-nowrap tabular-nums ${
-                  featuredSection ? 'hidden sm:flex' : 'flex'
+                  featuredSection ? 'hidden md:flex' : 'hidden sm:flex'
                 }`}
               >
                 <Flame className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -505,6 +541,90 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Scrollable Body */}
             <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+              {/* Active Family Profile Card + Quick Switcher */}
+              {(() => {
+                const profileColors = getProfileColorClasses(activeProfile.avatarColor);
+                const activeStats = getProfileProgressSummary(activeProfile, true);
+                return (
+                  <div className="p-3 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-10 h-10 rounded-xl ${profileColors.bg} text-white font-bold text-base flex items-center justify-center shrink-0`}
+                        >
+                          {getProfileInitial(activeProfile.name)}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs sm:text-sm font-bold text-white truncate">
+                            {activeProfile.name}
+                          </p>
+                          <p className="text-[11px] text-slate-400 tabular-nums truncate">
+                            {activeProfile.role} · سور: {activeStats.memorizedSurahsCount} · تجويد: {activeStats.tajweedSavedCount}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          onOpenProfiles();
+                        }}
+                        className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shrink-0 whitespace-nowrap"
+                      >
+                        <Users className="w-3.5 h-3.5 shrink-0" />
+                        <span>ملفات العائلة</span>
+                      </button>
+                    </div>
+
+                    {profiles.length > 1 ? (
+                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-slate-800/80">
+                        {profiles.map((p) => {
+                          const isCurrent = p.id === activeProfile.id;
+                          const c = getProfileColorClasses(p.avatarColor);
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() => {
+                                if (!isCurrent) {
+                                  onQuickSwitchProfile(p.id);
+                                  setDrawerOpen(false);
+                                }
+                              }}
+                              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold whitespace-nowrap shrink-0 cursor-pointer min-h-[36px] ${
+                                isCurrent
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-slate-900 border border-slate-800 text-slate-300 hover:text-white'
+                              }`}
+                            >
+                              <span
+                                className={`w-4 h-4 rounded-md ${c.bg} text-white text-[10px] flex items-center justify-center shrink-0`}
+                              >
+                                {getProfileInitial(p.name)}
+                              </span>
+                              <span>{p.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawerOpen(false);
+                          onOpenProfiles();
+                        }}
+                        className="w-full min-h-[36px] px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>إضافة ملف لأفراد العائلة على نفس الجهاز</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Main Screen Button Customization Controls */}
               <div className="p-3 rounded-2xl bg-slate-950/90 border border-emerald-500/25 space-y-3">
                 <div className="flex items-center justify-between gap-2">

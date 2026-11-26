@@ -26,6 +26,7 @@ import {
   Headphones,
   Sliders
 } from 'lucide-react';
+import { getActiveProfile } from '../utils/userProfiles';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -368,17 +369,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     });
   }, [managerSearch, managerJuzFilter]);
 
+  const activeProfile = getActiveProfile();
+
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-x-hidden">
+    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-x-clip">
       {/* Banner */}
       <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-500/30 shadow-2xl relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
         <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
         <div className="space-y-2 sm:space-y-3 z-10 text-center sm:text-right max-w-xl">
-          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
-            <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] sm:text-xs font-semibold">
-              لوحة الإنجاز والمتابعة القرآنية
-            </span>
-            <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-500/30 text-teal-300 text-[11px] font-bold">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 text-xs text-emerald-300 font-semibold">
+            <span>لوحة إنجاز {activeProfile.name}</span>
+            <span aria-hidden="true" className="text-slate-600">·</span>
+            <span className="text-teal-300 font-bold tabular-nums">
               ختم {stats.progressPercent}% من القرآن الكريم
             </span>
           </div>

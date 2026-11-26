@@ -5,11 +5,20 @@ import {
   HardDriveDownload,
   LogIn,
   LogOut,
+  Plus,
   Power,
   ShieldCheck,
+  UserCheck,
+  Users,
   X,
 } from 'lucide-react';
 import { APP_VERSION } from '../utils/offlineStorage';
+import {
+  UserProfile,
+  getProfileColorClasses,
+  getProfileInitial,
+  getProfileProgressSummary,
+} from '../utils/userProfiles';
 
 declare global {
   interface Window {
@@ -32,6 +41,7 @@ export function exitNativeAndroidApp(): void {
 interface SignOutModalProps {
   isOpen: boolean;
   onClose: () => void;
+  activeProfile: UserProfile;
   bookmarksCount: number;
   streak: number;
   onConfirmSignOut: (clearLocalData: boolean) => void;
@@ -40,12 +50,14 @@ interface SignOutModalProps {
 export const SignOutModal: React.FC<SignOutModalProps> = ({
   isOpen,
   onClose,
+  activeProfile,
   bookmarksCount,
   streak,
   onConfirmSignOut,
 }) => {
   const [clearLocalData, setClearLocalData] = useState(false);
   const isAndroidApk = canExitNativeAndroidApp();
+  const colors = getProfileColorClasses(activeProfile.avatarColor);
 
   useEffect(() => {
     if (!isOpen) {
@@ -82,8 +94,8 @@ export const SignOutModal: React.FC<SignOutModalProps> = ({
               <h2 id="signout-modal-title" className="text-base sm:text-lg font-bold text-white truncate">
                 تسجيل خروج من التطبيق
               </h2>
-              <p className="text-xs text-slate-400">
-                إنهاء الجلسة الحالية بأمان
+              <p className="text-xs text-slate-400 truncate">
+                إنهاء جلسة {activeProfile.name} بأمان
               </p>
             </div>
           </div>
@@ -99,14 +111,26 @@ export const SignOutModal: React.FC<SignOutModalProps> = ({
         </div>
 
         <div className="p-4 sm:p-5 space-y-4">
-          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-            سيتم إيقاف أي تلاوة أو قراءة صوتية نشطة وإنهاء جلسة الاستخدام الحالية. تبقى علاماتك وإنجازاتك محفوظة محلياً ما لم تختر مسحها.
-          </p>
-
-          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs text-slate-400 tabular-nums">
-            <span>العلامات المرجعية: {bookmarksCount}</span>
-            <span>السلسلة الحالية: {streak} أيام</span>
+          <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div
+                className={`w-9 h-9 rounded-xl ${colors.bg} text-white font-bold text-sm flex items-center justify-center shrink-0`}
+              >
+                {getProfileInitial(activeProfile.name)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-bold text-white truncate">{activeProfile.name}</p>
+                <p className="text-[11px] text-slate-400 truncate">{activeProfile.role}</p>
+              </div>
+            </div>
+            <span className="text-[11px] text-slate-400 tabular-nums shrink-0">
+              {bookmarksCount} علامة · {streak} أيام
+            </span>
           </div>
+
+          <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            سيتم إيقاف أي تلاوة أو قراءة صوتية نشطة والعودة إلى شاشة اختيار الملفات لتتمكن أنت أو أي فرد من العائلة من الدخول لاحقاً.
+          </p>
 
           <label className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-rose-500/30 cursor-pointer transition-colors">
             <input
@@ -117,10 +141,10 @@ export const SignOutModal: React.FC<SignOutModalProps> = ({
             />
             <div className="space-y-0.5 text-xs">
               <span className="font-bold text-slate-200 block">
-                مسح بيانات التقدم وتفضيلات القراء من هذا الجهاز
+                تصفير بيانات ملف «{activeProfile.name}» فقط
               </span>
               <span className="text-slate-400 block">
-                يُترك غير مفعّل للحفاظ على حفظك وأذكارك عند العودة.
+                تبقى ملفات باقي أفراد العائلة محفوظة ولن تتأثر.
               </span>
             </div>
           </label>
@@ -128,7 +152,7 @@ export const SignOutModal: React.FC<SignOutModalProps> = ({
           {clearLocalData && (
             <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-xs flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <span>تنبيه: سيتم حذف السجلات المحلية المخزنة على المتصفح نهائياً عند تأكيد الخروج.</span>
+              <span>تنبيه: سيتم تصفير حفظ وتجويد وأذكار «{activeProfile.name}» فقط عند تأكيد الخروج.</span>
             </div>
           )}
 
@@ -168,14 +192,20 @@ export const SignOutModal: React.FC<SignOutModalProps> = ({
 };
 
 interface SignedOutViewProps {
-  onResumeSession: () => void;
+  profiles: UserProfile[];
+  activeProfileId: string;
+  onSelectProfileAndResume: (profileId: string) => void;
+  onOpenProfilesManager: () => void;
   onOpenAbout: () => void;
   onOpenBackup: () => void;
   clearedData: boolean;
 }
 
 export const SignedOutView: React.FC<SignedOutViewProps> = ({
-  onResumeSession,
+  profiles,
+  activeProfileId,
+  onSelectProfileAndResume,
+  onOpenProfilesManager,
   onOpenAbout,
   onOpenBackup,
   clearedData,
@@ -184,7 +214,7 @@ export const SignedOutView: React.FC<SignedOutViewProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-8 font-cairo">
-      <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-6 sm:p-8 text-center space-y-6 animate-fadeIn">
+      <div className="w-full max-w-lg rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl p-5 sm:p-8 text-center space-y-6 animate-fadeIn">
         <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-950/50">
           <BookOpen className="w-8 h-8 text-white" />
         </div>
@@ -199,21 +229,71 @@ export const SignedOutView: React.FC<SignedOutViewProps> = ({
           </p>
           <p className="text-xs text-slate-400 leading-relaxed">
             {clearedData
-              ? 'تم مسح بيانات الجلسة المحلية وإعادة ضبط التفضيلات الافتراضية.'
-              : 'تم إيقاف القراءة الصوتية وإغلاق الجلسة مع الاحتفاظ ببيانات حفظك وعلاماتك محلياً.'}
+              ? 'تم تصفير بيانات الملف السابق، مع بقاء ملفات العائلة الأخرى محفوظة.'
+              : 'اختر ملفك الشخصي من ملفات العائلة أدناه لمتابعة حفظك وتلاوتك المستقلة.'}
           </p>
         </div>
 
-        <div className="space-y-2.5 pt-2">
-          <button
-            type="button"
-            onClick={onResumeSession}
-            className="w-full min-h-[48px] px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-emerald-950/50 cursor-pointer transition-all active:scale-[0.99]"
-          >
-            <LogIn className="w-4 h-4 shrink-0" />
-            <span>الدخول ومتابعة التلاوة</span>
-          </button>
+        {/* Family Profile Picker Cards */}
+        <div className="space-y-2 text-right">
+          <div className="flex items-center justify-between text-xs px-1">
+            <span className="font-bold text-slate-300 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>ملفات العائلة على هذا الجهاز ({profiles.length})</span>
+            </span>
+            <button
+              type="button"
+              onClick={onOpenProfilesManager}
+              className="text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 cursor-pointer py-1"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>إدارة / إضافة</span>
+            </button>
+          </div>
 
+          <div className="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+            {profiles.map((p) => {
+              const isLastActive = p.id === activeProfileId;
+              const colors = getProfileColorClasses(p.avatarColor);
+              const stats = getProfileProgressSummary(p, isLastActive);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => onSelectProfileAndResume(p.id)}
+                  className={`w-full p-3 rounded-2xl border flex items-center justify-between gap-3 text-right cursor-pointer transition-colors min-h-[60px] ${
+                    isLastActive
+                      ? 'bg-emerald-950/35 border-emerald-500/50 hover:bg-emerald-950/55'
+                      : 'bg-slate-950/70 border-slate-800 hover:border-emerald-500/40 hover:bg-slate-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className={`w-10 h-10 rounded-xl ${colors.bg} text-white font-bold text-base flex items-center justify-center shrink-0`}
+                    >
+                      {getProfileInitial(p.name)}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-bold text-white truncate">{p.name}</span>
+                        <span className="text-[11px] text-slate-400 truncate">· {p.role}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 tabular-nums truncate">
+                        سور: {stats.memorizedSurahsCount} · تجويد: {stats.tajweedSavedCount} · علامات: {stats.bookmarksCount}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-emerald-600/20 text-emerald-300 text-xs font-bold shrink-0">
+                    {isLastActive ? <UserCheck className="w-3.5 h-3.5" /> : <LogIn className="w-3.5 h-3.5" />}
+                    <span>دخول</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-2.5 pt-1">
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
