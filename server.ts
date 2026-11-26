@@ -304,14 +304,14 @@ app.get('/api/apk/info', (_req, res) => {
   res.json({
     appId: "com.murtal.smartquran",
     appName: "مرتل القرآن الذكي - نظام التجويد والحفظ",
-    version: "1.0.0",
-    versionCode: 100,
+    version: "1.1.0",
+    versionCode: 110,
     filename: "murtal-quran.apk",
     downloadUrl: "/downloads/murtal-quran.apk",
     apiUrl: "/api/apk/download",
-    fileSizeFormatted: "2.2 ميجابايت",
+    fileSizeFormatted: "3.8 ميجابايت",
     releaseDate: new Date().toISOString().split('T')[0],
-    minAndroid: "Android 8.0 (Oreo) أو أحدث",
+    minAndroid: "Android 7.0 (Nougat) أو أحدث",
     downloadCount: 184,
     bundledDatabaseStats: {
       surahsCount: 114,

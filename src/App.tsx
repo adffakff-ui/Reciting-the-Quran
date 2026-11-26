@@ -14,6 +14,10 @@ import { AdhkarView } from './components/AdhkarView';
 import { SpacedRepetitionView } from './components/SpacedRepetitionView';
 import { OfflineBackupView } from './components/OfflineBackupView';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { ShatibiyyahView } from './components/ShatibiyyahView';
+import { JazariyyahView } from './components/JazariyyahView';
+import { HisnAlMuslimView } from './components/HisnAlMuslimView';
+import { APP_VERSION } from './utils/offlineStorage';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('mushaf');
@@ -27,6 +31,7 @@ export default function App() {
   });
   const [streak, setStreak] = useState(7);
   const [coachParams, setCoachParams] = useState<{ surahName: string; ayahText: string; ayahNumber?: number } | null>(null);
+  const [targetBookmark, setTargetBookmark] = useState<{ surahName: string; ayahKey: string; nonce: number } | null>(null);
 
   useEffect(() => {
     try {
@@ -72,6 +77,7 @@ export default function App() {
             bookmarks={bookmarks}
             onToggleBookmark={handleToggleBookmark}
             onSelectAyahForCoach={handleSelectAyahForCoach}
+            targetBookmark={targetBookmark}
           />
         )}
         {activeTab === 'coach' && (
@@ -86,12 +92,16 @@ export default function App() {
         {activeTab === 'quiz' && <HifzQuizView />}
         {activeTab === 'spaced' && <SpacedRepetitionView />}
         {activeTab === 'adhkar' && <AdhkarView />}
+        {activeTab === 'hisn' && <HisnAlMuslimView />}
         {activeTab === 'guide' && <TajweedGuideView />}
+        {activeTab === 'jazariyyah' && <JazariyyahView />}
+        {activeTab === 'shatibiyyah' && <ShatibiyyahView />}
         {activeTab === 'dashboard' && (
           <DashboardView
             streak={streak}
             bookmarks={bookmarks}
             onSelectBookmark={(surahName, ayahKey) => {
+              setTargetBookmark({ surahName, ayahKey, nonce: Date.now() });
               setActiveTab('mushaf');
             }}
             onOpenBackup={() => setActiveTab('backup')}
@@ -104,7 +114,7 @@ export default function App() {
 
       {/* Footer */}
       <footer className="py-6 border-t border-slate-900 bg-slate-950 text-center text-xs text-slate-500">
-        <p>مرتل القرآن الذكي • نظام متكامل لترتيل القرآن الكريم وتجويده وحفظه بالذكاء الاصطناعي</p>
+        <p>مرتل القرآن الذكي • نظام متكامل لترتيل القرآن الكريم وتجويده وحفظه بالذكاء الاصطناعي • الإصدار {APP_VERSION}</p>
       </footer>
     </div>
   );

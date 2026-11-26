@@ -21,7 +21,10 @@ import {
   RotateCcw,
   X,
   Edit3,
-  BookOpen
+  BookOpen,
+  Star,
+  Headphones,
+  Sliders
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -38,7 +41,18 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
-import { QURAN_SURAHS, Surah } from '../data/quranData';
+import { QURAN_SURAHS, RECITERS, Surah } from '../data/quranData';
+import {
+  ReciterPreferences,
+  ReciterSectionKey,
+  getReciterPreferences,
+  toggleFavoriteReciter,
+  setSectionDefaultReciter,
+  setAllDefaultsToReciter,
+  sortWithFavoritesFirst,
+  formatSheikhOptionLabel,
+  RECITER_PREFERENCES_EVENT,
+} from '../utils/reciterPreferences';
 
 export interface MemorizedSurahRecord {
   surahNumber: number;
@@ -149,6 +163,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [isManagerOpen, setIsManagerOpen] = useState(false);
   const [managerSearch, setManagerSearch] = useState('');
   const [managerJuzFilter, setManagerJuzFilter] = useState<number | 'all'>('all');
+  const [reciterPrefs, setReciterPrefs] = useState<ReciterPreferences>(() => getReciterPreferences());
+  const [prefsNotice, setPrefsNotice] = useState<string | null>(null);
 
   // Persist to localStorage whenever changed
   useEffect(() => {
@@ -156,6 +172,23 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       localStorage.setItem('hifz_memorized_surahs', JSON.stringify(memorizedSurahs));
     } catch {}
   }, [memorizedSurahs]);
+
+  useEffect(() => {
+    const syncPrefs = () => setReciterPrefs(getReciterPreferences());
+    window.addEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+    window.addEventListener('murtal-backup-restored', syncPrefs);
+    return () => {
+      window.removeEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+      window.removeEventListener('murtal-backup-restored', syncPrefs);
+    };
+  }, []);
+
+  const showPrefsNotice = (msg: string) => {
+    setPrefsNotice(msg);
+    setTimeout(() => {
+      setPrefsNotice((prev) => (prev === msg ? null : prev));
+    }, 2600);
+  };
 
   // Overall calculations
   const stats = useMemo(() => {
@@ -795,6 +828,156 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             })}
           </div>
         )}
+      </div>
+
+      {/* Favorite & Default Reciters Settings Panel */}
+      <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-slate-900 border border-emerald-500/25 shadow-xl space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3 text-right">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <Star className="w-5 h-5 fill-current" />
+            </div>
+            <div>
+              <h3 className="text-base sm:text-xl font-bold text-white font-quran flex items-center gap-2">
+                <span>إعدادات القراء المفضلين والافتراضيين</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                ميّز قراءك المفضلين بالنجمة واختر القارئ الافتراضي لكل قسم ليبدأ التشغيل به تلقائياً.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-bold">
+              المفضلون: {reciterPrefs.favoriteReciterIds.length} / {RECITERS.length}
+            </span>
+          </div>
+        </div>
+
+        {prefsNotice && (
+          <div className="px-4 py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold">
+            {prefsNotice}
+          </div>
+        )}
+
+        {/* Per-Section Default Reciter Pickers */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+            <Sliders className="w-4 h-4" />
+            <span>تخصيص القارئ الافتراضي حسب القسم:</span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {(
+              [
+                { key: 'surah' as ReciterSectionKey, label: 'تلاوة السور والمصحف والمعلم', value: reciterPrefs.defaultSurahReciterId },
+                { key: 'adhkar' as ReciterSectionKey, label: 'أذكار الصباح والمساء', value: reciterPrefs.defaultAdhkarSheikhId },
+                { key: 'hisn' as ReciterSectionKey, label: 'حصن المسلم', value: reciterPrefs.defaultHisnSheikhId },
+                { key: 'shatibiyyah' as ReciterSectionKey, label: 'متن الشاطبية', value: reciterPrefs.defaultShatibiyyahSheikhId },
+                { key: 'jazariyyah' as ReciterSectionKey, label: 'متن الجزرية', value: reciterPrefs.defaultJazariyyahSheikhId },
+              ]
+            ).map((sec) => {
+              const sortedReciters = sortWithFavoritesFirst(RECITERS, reciterPrefs.favoriteReciterIds);
+              return (
+                <div
+                  key={sec.key}
+                  className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2"
+                >
+                  <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Headphones className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>{sec.label}</span>
+                  </label>
+                  <select
+                    value={sec.value}
+                    onChange={(e) => {
+                      const updated = setSectionDefaultReciter(sec.key, e.target.value);
+                      setReciterPrefs(updated);
+                      const rName = RECITERS.find((r) => r.id === e.target.value)?.name || '';
+                      showPrefsNotice(`تم اعتماد ${rName} افتراضياً لقسم ${sec.label}`);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[40px] cursor-pointer"
+                  >
+                    {sortedReciters.map((r) => {
+                      const isFav = reciterPrefs.favoriteReciterIds.includes(r.id);
+                      return (
+                        <option key={r.id} value={r.id}>
+                          {formatSheikhOptionLabel(r.name, r.style, isFav)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Interactive 14 Sheikhs Star & Unified Default Grid */}
+        <div className="space-y-2.5 pt-2 border-t border-slate-800/80">
+          <p className="text-xs font-bold text-slate-300">
+            قائمة الشيوخ (اضغط على النجمة للتفضيل أو «اعتماد للكل» لتثبيته في جميع الأقسام):
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {sortWithFavoritesFirst(RECITERS, reciterPrefs.favoriteReciterIds).map((reciter) => {
+              const isFav = reciterPrefs.favoriteReciterIds.includes(reciter.id);
+              const isAllDefault =
+                reciterPrefs.defaultSurahReciterId === reciter.id &&
+                reciterPrefs.defaultAdhkarSheikhId === reciter.id &&
+                reciterPrefs.defaultHisnSheikhId === reciter.id &&
+                reciterPrefs.defaultShatibiyyahSheikhId === reciter.id &&
+                reciterPrefs.defaultJazariyyahSheikhId === reciter.id;
+
+              return (
+                <div
+                  key={reciter.id}
+                  className={`p-3 rounded-2xl border flex items-center justify-between gap-2 transition-all ${
+                    isAllDefault
+                      ? 'bg-emerald-950/35 border-emerald-500/50'
+                      : isFav
+                      ? 'bg-amber-950/15 border-amber-500/30'
+                      : 'bg-slate-950/60 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <button
+                      onClick={() => {
+                        const updated = toggleFavoriteReciter(reciter.id);
+                        setReciterPrefs(updated);
+                      }}
+                      className={`p-2 rounded-xl border shrink-0 cursor-pointer transition-colors ${
+                        isFav
+                          ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
+                          : 'bg-slate-900 border-slate-700 text-slate-500 hover:text-amber-300'
+                      }`}
+                      title={isFav ? 'إزالة من المفضلة' : 'إضافة للمفضلة'}
+                    >
+                      <Star className={`w-4 h-4 ${isFav ? 'fill-current' : ''}`} />
+                    </button>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">{reciter.name}</p>
+                      <p className="text-[11px] text-slate-400 truncate">{reciter.style}</p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      const updated = setAllDefaultsToReciter(reciter.id);
+                      setReciterPrefs(updated);
+                      showPrefsNotice(`تم تعيين ${reciter.name} كقارئ افتراضي لجميع الأقسام`);
+                    }}
+                    className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold shrink-0 cursor-pointer border transition-colors ${
+                      isAllDefault
+                        ? 'bg-emerald-600 border-emerald-400 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-emerald-500/50 hover:text-emerald-300'
+                    }`}
+                  >
+                    {isAllDefault ? 'افتراضي للكل' : 'اعتماد للكل'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Offline Backup Shortcut Card */}

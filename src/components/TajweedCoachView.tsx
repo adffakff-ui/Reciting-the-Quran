@@ -10,6 +10,14 @@ import {
   getReciterAyahAudioUrl, getReciterBasmalahAudioUrl, getAyahDisplayText 
 } from '../data/quranData';
 import { resolvePlayableAudioSrc } from '../utils/offlineStorage';
+import {
+  RECITER_PREFERENCES_EVENT,
+  formatSheikhOptionLabel,
+  getReciterByIdOrIdentifier,
+  getReciterPreferences,
+  setSectionDefaultReciter,
+  sortWithFavoritesFirst,
+} from '../utils/reciterPreferences';
 import confetti from 'canvas-confetti';
 
 interface TajweedCoachViewProps {
@@ -148,14 +156,29 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
   const [activeMode, setActiveMode] = useState<'liveTest' | 'audioRecording'>('liveTest');
 
   // Selected Reciter (Sheikh) for model audio
+  const [favoriteReciterIds, setFavoriteReciterIds] = useState<string[]>(() => getReciterPreferences().favoriteReciterIds);
   const [selectedReciter, setSelectedReciter] = useState<Reciter>(() => {
     try {
-      const saved = localStorage.getItem('mushaf_reciter');
-      return RECITERS.find(r => r.identifier === saved) || RECITERS[0];
+      const prefs = getReciterPreferences();
+      return getReciterByIdOrIdentifier(prefs.defaultSurahReciterId);
     } catch {
       return RECITERS[0];
     }
   });
+
+  useEffect(() => {
+    const syncPrefs = () => {
+      const prefs = getReciterPreferences();
+      setFavoriteReciterIds(prefs.favoriteReciterIds);
+      setSelectedReciter(getReciterByIdOrIdentifier(prefs.defaultSurahReciterId));
+    };
+    window.addEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+    window.addEventListener('murtal-backup-restored', syncPrefs);
+    return () => {
+      window.removeEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+      window.removeEventListener('murtal-backup-restored', syncPrefs);
+    };
+  }, []);
 
   // Calculate verse text based on selectedAyahNumber
   const isBasmalahSelected = selectedAyahNumber === 0;
@@ -927,13 +950,17 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
               value={selectedReciter.identifier}
               onChange={(e) => {
                 const rec = RECITERS.find(r => r.identifier === e.target.value);
-                if (rec) setSelectedReciter(rec);
+                if (rec) {
+                  setSelectedReciter(rec);
+                  const updated = setSectionDefaultReciter('surah', rec.id);
+                  setFavoriteReciterIds(updated.favoriteReciterIds);
+                }
               }}
               className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer"
             >
-              {RECITERS.map((r) => (
+              {sortWithFavoritesFirst(RECITERS, favoriteReciterIds).map((r) => (
                 <option key={r.id} value={r.identifier}>
-                  {r.name} ({r.style})
+                  {formatSheikhOptionLabel(r.name, r.style, favoriteReciterIds.includes(r.id))}
                 </option>
               ))}
             </select>

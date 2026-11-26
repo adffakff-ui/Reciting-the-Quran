@@ -2,18 +2,28 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sun, Moon, CheckCircle2, RotateCcw, Volume2, 
   Pause, Play, Square, SkipForward, SkipBack, Gauge, 
-  Headphones, UserCheck, Check, Radio
+  Headphones, UserCheck, Check, Radio, Star
 } from 'lucide-react';
 import { ADHKAR_LIST, ADHKAR_SHEIKHS, DhikrItem, AdhkarSheikh } from '../data/adhkarData';
 import { prefetchAudioToCache, resolvePlayableAudioSrc } from '../utils/offlineStorage';
+import {
+  RECITER_PREFERENCES_EVENT,
+  formatSheikhOptionLabel,
+  getReciterPreferences,
+  getSheikhById,
+  setSectionDefaultReciter,
+  sortWithFavoritesFirst,
+  toggleFavoriteReciter,
+} from '../utils/reciterPreferences';
 import confetti from 'canvas-confetti';
 
 export const AdhkarView: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'morning' | 'evening'>('morning');
+  const [favoriteReciterIds, setFavoriteReciterIds] = useState<string[]>(() => getReciterPreferences().favoriteReciterIds);
   const [selectedSheikh, setSelectedSheikh] = useState<AdhkarSheikh>(() => {
     try {
-      const savedId = localStorage.getItem('adhkar_sheikh_id');
-      return ADHKAR_SHEIKHS.find(s => s.id === savedId) || ADHKAR_SHEIKHS[0];
+      const prefs = getReciterPreferences();
+      return getSheikhById(prefs.defaultAdhkarSheikhId);
     } catch {
       return ADHKAR_SHEIKHS[0];
     }
@@ -50,6 +60,9 @@ export const AdhkarView: React.FC = () => {
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentRevokeRef = useRef<(() => void) | null>(null);
   const preloadedAudioRef = useRef<{ url: string; audio: HTMLAudioElement } | null>(null);
+  const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const speechPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechSessionTokenRef = useRef(0);
   const selectedSheikhRef = useRef(selectedSheikh);
   const playbackSpeedRef = useRef(playbackSpeed);
   const autoIncrementRef = useRef(autoIncrementCounter);
@@ -97,9 +110,20 @@ export const AdhkarView: React.FC = () => {
     }
   }, [playbackSpeed]);
 
-  // Clean up audio on unmount
+  // Sync with global favorite & default reciter settings + clean up audio on unmount
   useEffect(() => {
+    const syncPrefs = () => {
+      const prefs = getReciterPreferences();
+      setFavoriteReciterIds(prefs.favoriteReciterIds);
+      const nextSheikh = getSheikhById(prefs.defaultAdhkarSheikhId);
+      setSelectedSheikh(nextSheikh);
+      selectedSheikhRef.current = nextSheikh;
+    };
+    window.addEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+    window.addEventListener('murtal-backup-restored', syncPrefs);
     return () => {
+      window.removeEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+      window.removeEventListener('murtal-backup-restored', syncPrefs);
       stopAudio();
     };
   }, []);
@@ -144,6 +168,16 @@ export const AdhkarView: React.FC = () => {
   // Stop Audio Completely
   const stopAudio = () => {
     isCancelledRef.current = true;
+    speechSessionTokenRef.current += 1;
+    if (speechPendingTimerRef.current !== null) {
+      clearTimeout(speechPendingTimerRef.current);
+      speechPendingTimerRef.current = null;
+    }
+    if (speechUtteranceRef.current) {
+      speechUtteranceRef.current.onend = null;
+      speechUtteranceRef.current.onerror = null;
+      speechUtteranceRef.current = null;
+    }
     if (currentAudioRef.current) {
       currentAudioRef.current.onended = null;
       currentAudioRef.current.onerror = null;
@@ -159,7 +193,9 @@ export const AdhkarView: React.FC = () => {
       preloadedAudioRef.current = null;
     }
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
     setPlayingDhikrId(null);
     setIsAutoplayingAll(false);
@@ -237,6 +273,16 @@ export const AdhkarView: React.FC = () => {
 
     // Cancel previous audio without losing autoplay state when requested
     isCancelledRef.current = true;
+    speechSessionTokenRef.current += 1;
+    if (speechPendingTimerRef.current !== null) {
+      clearTimeout(speechPendingTimerRef.current);
+      speechPendingTimerRef.current = null;
+    }
+    if (speechUtteranceRef.current) {
+      speechUtteranceRef.current.onend = null;
+      speechUtteranceRef.current.onerror = null;
+      speechUtteranceRef.current = null;
+    }
     if (currentAudioRef.current) {
       currentAudioRef.current.onended = null;
       currentAudioRef.current.onerror = null;
@@ -244,7 +290,9 @@ export const AdhkarView: React.FC = () => {
       currentAudioRef.current = null;
     }
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
 
     const activeSheikh = sheikhOverride || selectedSheikhRef.current;
@@ -390,50 +438,79 @@ export const AdhkarView: React.FC = () => {
 
     setCurrentRepetition(rep);
     const cleanText = sanitizeForSpeech(item.text);
-    const utterance = new SpeechSynthesisUtterance(cleanText);
-    utterance.lang = 'ar-SA';
-    utterance.rate = Math.max(0.5, Math.min(1.6, playbackSpeedRef.current * (sheikh.speechRate || 1.0)));
-    utterance.pitch = sheikh.speechPitch || 1.0;
+    const myToken = ++speechSessionTokenRef.current;
+    const wasActive =
+      window.speechSynthesis.speaking || window.speechSynthesis.pending;
+    if (wasActive) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
 
-    const voice = getArabicVoice();
-    if (voice) utterance.voice = voice;
+    const startSpeech = () => {
+      if (isCancelledRef.current || myToken !== speechSessionTokenRef.current) return;
 
-    utterance.onend = () => {
-      if (isCancelledRef.current) return;
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      utterance.lang = 'ar-SA';
+      utterance.rate = Math.max(0.5, Math.min(1.6, playbackSpeedRef.current * (sheikh.speechRate || 1.0)));
+      utterance.pitch = sheikh.speechPitch || 1.0;
 
-      if (autoIncrementRef.current) {
-        handleIncrement(item.id, item.count);
-      }
+      const voice = getArabicVoice();
+      if (voice) utterance.voice = voice;
 
-      if (rep < maxReps && !isCancelledRef.current) {
-        setTimeout(() => {
-          if (!isCancelledRef.current) {
-            playSheikhSpeechAudio(item, rep + 1, maxReps, autoplaySequence, sheikh);
-          }
-        }, 600);
-      } else {
-        if (autoplaySequence) {
+      utterance.onend = () => {
+        if (isCancelledRef.current || myToken !== speechSessionTokenRef.current) return;
+        speechUtteranceRef.current = null;
+
+        if (autoIncrementRef.current) {
+          handleIncrement(item.id, item.count);
+        }
+
+        if (rep < maxReps && !isCancelledRef.current) {
           setTimeout(() => {
-            if (!isCancelledRef.current) {
-              moveToNextSequentialDhikr(item.id, sheikh);
+            if (!isCancelledRef.current && myToken === speechSessionTokenRef.current) {
+              playSheikhSpeechAudio(item, rep + 1, maxReps, autoplaySequence, sheikh);
             }
-          }, 1000);
+          }, 600);
         } else {
+          if (autoplaySequence) {
+            setTimeout(() => {
+              if (!isCancelledRef.current && myToken === speechSessionTokenRef.current) {
+                moveToNextSequentialDhikr(item.id, sheikh);
+              }
+            }, 1000);
+          } else {
+            setPlayingDhikrId(null);
+            setIsAutoplayingAll(false);
+            setCurrentRepetition(1);
+          }
+        }
+      };
+
+      utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+        if (myToken !== speechSessionTokenRef.current) return;
+        if (event?.error === 'canceled' || event?.error === 'interrupted') {
+          return;
+        }
+        speechUtteranceRef.current = null;
+        if (!isCancelledRef.current) {
           setPlayingDhikrId(null);
           setIsAutoplayingAll(false);
-          setCurrentRepetition(1);
         }
-      }
+      };
+
+      speechUtteranceRef.current = utterance;
+      window.speechSynthesis.speak(utterance);
     };
 
-    utterance.onerror = () => {
-      if (!isCancelledRef.current) {
-        setPlayingDhikrId(null);
-        setIsAutoplayingAll(false);
-      }
-    };
-
-    window.speechSynthesis.speak(utterance);
+    if (wasActive) {
+      speechPendingTimerRef.current = setTimeout(() => {
+        speechPendingTimerRef.current = null;
+        startSpeech();
+      }, 45);
+    } else {
+      startSpeech();
+    }
   };
 
   // Move to Next Dhikr during Autoplay Sequence
@@ -493,6 +570,8 @@ export const AdhkarView: React.FC = () => {
   const handleSelectSheikh = (newSheikh: AdhkarSheikh) => {
     setSelectedSheikh(newSheikh);
     selectedSheikhRef.current = newSheikh;
+    const updated = setSectionDefaultReciter('adhkar', newSheikh.id);
+    setFavoriteReciterIds(updated.favoriteReciterIds);
 
     if (playingDhikrId) {
       const current = filteredAdhkar.find(d => d.id === playingDhikrId);
@@ -591,28 +670,43 @@ export const AdhkarView: React.FC = () => {
             </div>
           </div>
 
-          <div className="w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <select
               value={selectedSheikh.id}
               onChange={(e) => {
                 const found = ADHKAR_SHEIKHS.find(s => s.id === e.target.value);
                 if (found) handleSelectSheikh(found);
               }}
-              className="w-full sm:w-auto bg-slate-800 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer"
+              className="flex-1 sm:w-auto bg-slate-800 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer"
             >
-              {ADHKAR_SHEIKHS.map((s) => (
+              {sortWithFavoritesFirst(ADHKAR_SHEIKHS, favoriteReciterIds).map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name} ({s.style})
+                  {formatSheikhOptionLabel(s.name, s.style, favoriteReciterIds.includes(s.id))}
                 </option>
               ))}
             </select>
+            <button
+              onClick={() => {
+                const updated = toggleFavoriteReciter(selectedSheikh.id);
+                setFavoriteReciterIds(updated.favoriteReciterIds);
+              }}
+              className={`p-2.5 rounded-xl border min-h-[42px] min-w-[42px] flex items-center justify-center cursor-pointer transition-colors shrink-0 ${
+                favoriteReciterIds.includes(selectedSheikh.id)
+                  ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-300'
+              }`}
+              title={favoriteReciterIds.includes(selectedSheikh.id) ? 'إزالة من القراء المفضلين' : 'إضافة إلى القراء المفضلين'}
+            >
+              <Star className={`w-4 h-4 ${favoriteReciterIds.includes(selectedSheikh.id) ? 'fill-current' : ''}`} />
+            </button>
           </div>
         </div>
 
         {/* Quick Sheikh chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1">
-          {ADHKAR_SHEIKHS.map((s) => {
+          {sortWithFavoritesFirst(ADHKAR_SHEIKHS, favoriteReciterIds).map((s) => {
             const isSelected = selectedSheikh.id === s.id;
+            const isFav = favoriteReciterIds.includes(s.id);
             return (
               <button
                 key={s.id}
@@ -620,9 +714,12 @@ export const AdhkarView: React.FC = () => {
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all shrink-0 cursor-pointer min-h-[36px] ${
                   isSelected
                     ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/60'
+                    : isFav
+                    ? 'bg-amber-950/30 border border-amber-500/35 text-amber-200 hover:text-white'
                     : 'bg-slate-800/80 border border-slate-700/60 text-slate-300 hover:text-white'
                 }`}
               >
+                {isFav && <Star className="w-3 h-3 text-amber-400 fill-current shrink-0" />}
                 <span>{s.name}</span>
                 {isSelected && <Check className="w-3.5 h-3.5" />}
               </button>

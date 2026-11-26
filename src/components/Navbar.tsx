@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   BookOpen, Mic, Brain, ShieldCheck, BarChart3, 
-  Sun, Calendar, Menu, X, Flame, ChevronLeft, HardDriveDownload 
+  Sun, Calendar, Menu, X, Flame, ChevronLeft, HardDriveDownload, ScrollText, BookMarked, Shield 
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -20,7 +20,10 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, streak 
     { id: 'quiz', label: 'اختبارات الحفظ', shortLabel: 'الاختبارات', icon: Brain },
     { id: 'spaced', label: 'التكرار المتباعد', shortLabel: 'المراجعة', icon: Calendar },
     { id: 'adhkar', label: 'الأذكار اليومية', shortLabel: 'الأذكار', icon: Sun },
+    { id: 'hisn', label: 'حصن المسلم', shortLabel: 'حصن المسلم', icon: Shield },
     { id: 'guide', label: 'دليلك للتجويد', shortLabel: 'أحكام التجويد', icon: ShieldCheck },
+    { id: 'jazariyyah', label: 'متن الجزرية', shortLabel: 'الجزرية', icon: BookMarked },
+    { id: 'shatibiyyah', label: 'متن الشاطبية', shortLabel: 'الشاطبية', icon: ScrollText },
     { id: 'dashboard', label: 'لوحة الإنجاز', shortLabel: 'الإنجاز', icon: BarChart3 },
     { id: 'backup', label: 'النسخة الاحتياطية', shortLabel: 'أوفلاين', icon: HardDriveDownload },
   ];
@@ -54,7 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, streak 
           </div>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-1.5 xl:gap-2">
+          <nav className="hidden lg:flex items-center gap-1 overflow-x-auto no-scrollbar max-w-full px-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -62,14 +65,14 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, streak 
                 <button
                   key={item.id}
                   onClick={() => handleSelectTab(item.id)}
-                  className={`flex items-center gap-2 px-3 xl:px-4 py-2 rounded-xl text-xs xl:text-sm font-semibold transition-all duration-200 cursor-pointer min-h-[40px] ${
+                  className={`flex items-center gap-1.5 px-2.5 xl:px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-all duration-200 cursor-pointer min-h-[38px] ${
                     isActive
                       ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 shadow-inner'
                       : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span>{item.label}</span>
+                  <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-emerald-400' : 'text-slate-400'}`} />
+                  <span>{item.shortLabel}</span>
                 </button>
               );
             })}
@@ -155,7 +158,10 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab, streak 
                         {item.id === 'quiz' && 'اختبارات الحفظ والربط بين الآيات'}
                         {item.id === 'spaced' && 'تثبيت الحفظ بجدولة علمية ذكية'}
                         {item.id === 'adhkar' && 'أذكار الصباح والمساء والورد اليومي'}
+                        {item.id === 'hisn' && 'أذكار وأدعية الكتاب والسنة لليوم والليلة'}
                         {item.id === 'guide' && 'أحكام النون، الميم، القلقلة، والمدود'}
+                        {item.id === 'jazariyyah' && 'المقدمة الجزرية في مخارج الحروف والصفات'}
+                        {item.id === 'shatibiyyah' && 'حرز الأماني ورموز القراء السبعة ورواتهم'}
                         {item.id === 'dashboard' && 'متابعة الإنجاز اليومي والإحصائيات'}
                         {item.id === 'backup' && 'تصدير، استعادة، وتنزيل التلاوات بدون إنترنت'}
                       </span>

@@ -36,6 +36,7 @@ import { ADHKAR_SHEIKHS } from '../data/adhkarData';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 import { PWAInstallButton } from './PWAInstallButton';
 import {
+  APP_VERSION,
   BackupPayload,
   LocalSnapshot,
   OfflineAudioPack,
@@ -455,6 +456,9 @@ export const OfflineBackupView: React.FC = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-900/90 border border-emerald-500/30 text-emerald-300">
+              <span>الإصدار {APP_VERSION}</span>
+            </div>
             <div
               className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold border ${
                 isOnline

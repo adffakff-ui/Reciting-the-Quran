@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Search, BookOpen, Volume2, Bookmark, Sparkles, ChevronRight, 
   Play, Pause, ChevronLeft, Square, SkipForward, SkipBack, 
-  Repeat, Gauge, Radio, ListOrdered, HardDriveDownload, CheckCircle2, Loader2
+  Repeat, Gauge, Radio, ListOrdered, HardDriveDownload, CheckCircle2, Loader2, Star
 } from 'lucide-react';
 import { 
   QURAN_SURAHS, RECITERS, Surah, Ayah, 
@@ -16,24 +16,37 @@ import {
   prefetchAudioToCache,
   resolvePlayableAudioSrc,
 } from '../utils/offlineStorage';
+import {
+  RECITER_PREFERENCES_EVENT,
+  formatSheikhOptionLabel,
+  getReciterByIdOrIdentifier,
+  getReciterPreferences,
+  setSectionDefaultReciter,
+  sortWithFavoritesFirst,
+  toggleFavoriteReciter,
+} from '../utils/reciterPreferences';
 
 interface MushafViewProps {
   bookmarks: string[];
   onToggleBookmark: (ayahKey: string) => void;
   onSelectAyahForCoach: (surahName: string, ayahText: string, ayahNumber?: number) => void;
+  targetBookmark?: { surahName: string; ayahKey: string; nonce: number } | null;
 }
 
 export const MushafView: React.FC<MushafViewProps> = ({
   bookmarks,
   onToggleBookmark,
   onSelectAyahForCoach,
+  targetBookmark,
 }) => {
   const [selectedSurah, setSelectedSurah] = useState<Surah | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [favoriteReciterIds, setFavoriteReciterIds] = useState<string[]>(() => getReciterPreferences().favoriteReciterIds);
   const [selectedReciter, setSelectedReciter] = useState(() => {
     try {
-      const saved = localStorage.getItem('mushaf_reciter');
-      return saved && RECITERS.some(r => r.identifier === saved) ? saved : RECITERS[0].identifier;
+      const prefs = getReciterPreferences();
+      const rec = getReciterByIdOrIdentifier(prefs.defaultSurahReciterId);
+      return rec.identifier;
     } catch {
       return RECITERS[0].identifier;
     }
@@ -98,6 +111,7 @@ export const MushafView: React.FC<MushafViewProps> = ({
   // Refs to prevent stale closures during sequential callbacks
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const preloadedAudioRef = useRef<{ url: string; audio: HTMLAudioElement } | null>(null);
+  const activeSpeechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const isCancelledRef = useRef(false);
   const selectedReciterRef = useRef(selectedReciter);
   const autoContinueRef = useRef(autoContinue);
@@ -164,10 +178,48 @@ export const MushafView: React.FC<MushafViewProps> = ({
   }, [playbackSpeed]);
 
   useEffect(() => {
+    const syncPrefs = () => {
+      const prefs = getReciterPreferences();
+      setFavoriteReciterIds(prefs.favoriteReciterIds);
+      const nextIdentifier = getReciterByIdOrIdentifier(prefs.defaultSurahReciterId).identifier;
+      setSelectedReciter(nextIdentifier);
+      selectedReciterRef.current = nextIdentifier;
+    };
+    window.addEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+    window.addEventListener('murtal-backup-restored', syncPrefs);
     return () => {
+      window.removeEventListener(RECITER_PREFERENCES_EVENT, syncPrefs);
+      window.removeEventListener('murtal-backup-restored', syncPrefs);
       stopAllAudio();
     };
   }, []);
+
+  useEffect(() => {
+    if (!targetBookmark) return;
+    const [surahNumStr, ayahNumStr] = targetBookmark.ayahKey.split(':');
+    const surahNum = Number(surahNumStr);
+    const ayahNum = Number(ayahNumStr);
+    const foundSurah =
+      QURAN_SURAHS.find((s) => s.number === surahNum) ||
+      QURAN_SURAHS.find((s) => s.name === targetBookmark.surahName);
+    if (!foundSurah) return;
+
+    stopAllAudio();
+    setSelectedSurah(foundSurah);
+    if (!isNaN(ayahNum) && ayahNum > 0) {
+      if (foundSurah.ayahs.length > 50) {
+        setAyahPage(Math.ceil(ayahNum / pageSize));
+      } else {
+        setAyahPage(1);
+      }
+      setTimeout(() => {
+        const el = document.getElementById(`ayah-${ayahNum}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 150);
+    } else {
+      setAyahPage(1);
+    }
+  }, [targetBookmark]);
 
   const filteredSurahs = QURAN_SURAHS.filter((surah) => {
     const matchesSearch = surah.name.includes(searchQuery) || 
@@ -202,8 +254,15 @@ export const MushafView: React.FC<MushafViewProps> = ({
       preloadedAudioRef.current.audio.src = '';
       preloadedAudioRef.current = null;
     }
+    if (activeSpeechUtteranceRef.current) {
+      activeSpeechUtteranceRef.current.onend = null;
+      activeSpeechUtteranceRef.current.onerror = null;
+      activeSpeechUtteranceRef.current = null;
+    }
     if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
     }
     setPlayingAyahNumber(null);
     setIsPlayingFullSurah(false);
@@ -255,13 +314,19 @@ export const MushafView: React.FC<MushafViewProps> = ({
 
       navigator.mediaSession.setActionHandler('play', () => {
         if (currentAudioRef.current && currentAudioRef.current.paused) {
-          currentAudioRef.current.play();
+          currentAudioRef.current.play().catch(() => {});
+          setIsPaused(false);
+        } else if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.resume();
           setIsPaused(false);
         }
       });
       navigator.mediaSession.setActionHandler('pause', () => {
         if (currentAudioRef.current && !currentAudioRef.current.paused) {
           currentAudioRef.current.pause();
+          setIsPaused(true);
+        } else if (typeof window !== 'undefined' && window.speechSynthesis) {
+          window.speechSynthesis.pause();
           setIsPaused(true);
         }
       });
@@ -370,10 +435,16 @@ export const MushafView: React.FC<MushafViewProps> = ({
       const u = new SpeechSynthesisUtterance('بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ');
       u.lang = 'ar-SA';
       u.rate = Math.max(0.6, Math.min(1.5, playbackSpeedRef.current * 0.9));
-      u.onend = handleBasmalahCompleted;
-      u.onerror = () => {
+      u.onend = () => {
+        activeSpeechUtteranceRef.current = null;
+        handleBasmalahCompleted();
+      };
+      u.onerror = (event: SpeechSynthesisErrorEvent) => {
+        if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+        activeSpeechUtteranceRef.current = null;
         if (!isCancelledRef.current) stopAllAudio();
       };
+      activeSpeechUtteranceRef.current = u;
       window.speechSynthesis.speak(u);
     };
 
@@ -503,10 +574,16 @@ export const MushafView: React.FC<MushafViewProps> = ({
       const u = new SpeechSynthesisUtterance(ayah.text);
       u.lang = 'ar-SA';
       u.rate = Math.max(0.6, Math.min(1.5, playbackSpeedRef.current * 0.9));
-      u.onend = handleAyahCompleted;
-      u.onerror = () => {
+      u.onend = () => {
+        activeSpeechUtteranceRef.current = null;
+        handleAyahCompleted();
+      };
+      u.onerror = (event: SpeechSynthesisErrorEvent) => {
+        if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+        activeSpeechUtteranceRef.current = null;
         if (!isCancelledRef.current) stopAllAudio();
       };
+      activeSpeechUtteranceRef.current = u;
       window.speechSynthesis.speak(u);
     };
 
@@ -662,6 +739,9 @@ export const MushafView: React.FC<MushafViewProps> = ({
   const handleReciterChange = (newReciterId: string) => {
     setSelectedReciter(newReciterId);
     selectedReciterRef.current = newReciterId;
+    const matched = getReciterByIdOrIdentifier(newReciterId);
+    const updated = setSectionDefaultReciter('surah', matched.id);
+    setFavoriteReciterIds(updated.favoriteReciterIds);
     if (selectedSurah && playingAyahNumber !== null) {
       playAyahSequence(selectedSurah, playingAyahNumber, isPlayingFullSurah || autoContinue, newReciterId);
     }
@@ -760,17 +840,33 @@ export const MushafView: React.FC<MushafViewProps> = ({
 
               {/* Reciter and Listen Button */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
-                <select
-                  value={selectedReciter}
-                  onChange={(e) => handleReciterChange(e.target.value)}
-                  className="bg-slate-800 border border-emerald-500/30 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] w-full sm:w-auto cursor-pointer"
-                >
-                  {RECITERS.map((r) => (
-                    <option key={r.id} value={r.identifier}>
-                      {r.name} ({r.style})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1.5 w-full sm:w-auto">
+                  <select
+                    value={selectedReciter}
+                    onChange={(e) => handleReciterChange(e.target.value)}
+                    className="bg-slate-800 border border-emerald-500/30 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] flex-1 sm:w-auto cursor-pointer"
+                  >
+                    {sortWithFavoritesFirst(RECITERS, favoriteReciterIds).map((r) => (
+                      <option key={r.id} value={r.identifier}>
+                        {formatSheikhOptionLabel(r.name, r.style, favoriteReciterIds.includes(r.id))}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const updated = toggleFavoriteReciter(activeReciterObj.id);
+                      setFavoriteReciterIds(updated.favoriteReciterIds);
+                    }}
+                    className={`p-2.5 rounded-xl border min-h-[42px] min-w-[42px] flex items-center justify-center cursor-pointer transition-colors shrink-0 ${
+                      favoriteReciterIds.includes(activeReciterObj.id)
+                        ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-amber-300'
+                    }`}
+                    title={favoriteReciterIds.includes(activeReciterObj.id) ? 'إزالة من المفضلة' : 'إضافة للمفضلة'}
+                  >
+                    <Star className={`w-4 h-4 ${favoriteReciterIds.includes(activeReciterObj.id) ? 'fill-current' : ''}`} />
+                  </button>
+                </div>
 
                 <button
                   onClick={() => handlePlaySurahAudio(selectedSurah)}

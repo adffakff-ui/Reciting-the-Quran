@@ -27,6 +27,8 @@ SERVER_DATA_DIR = os.path.join(BASE_DIR, 'data')
 ANDROID_SRC_DIR = os.path.join(BASE_DIR, 'android', 'app', 'src', 'main')
 
 APK_FILENAME = 'murtal-quran.apk'
+APP_VERSION_NAME = '1.1.0'
+APP_VERSION_CODE = 110
 APK_PATH = os.path.join(OUTPUT_DIR, APK_FILENAME)
 DIST_APK_PATH = os.path.join(DIST_DIR, 'downloads', APK_FILENAME)
 
@@ -136,8 +138,8 @@ def build_apk_info_dict(apk_size: int, apk_sha256: str):
     return {
         "appId": "com.murtal.smartquran",
         "appName": "مرتل القرآن الذكي - نظام التجويد والحفظ",
-        "version": "1.0.0",
-        "versionCode": 100,
+        "version": APP_VERSION_NAME,
+        "versionCode": APP_VERSION_CODE,
         "filename": APK_FILENAME,
         "downloadUrl": "/downloads/murtal-quran.apk",
         "apiUrl": "/api/apk/download",
@@ -242,8 +244,8 @@ def build_real_apk(tools):
                 '--java', gen_java_dir,
                 '--min-sdk-version', '24',
                 '--target-sdk-version', '34',
-                '--version-code', '100',
-                '--version-name', '1.0.0',
+                '--version-code', str(APP_VERSION_CODE),
+                '--version-name', APP_VERSION_NAME,
                 '-A', assets_dir,
                 compiled_res_zip,
             ],

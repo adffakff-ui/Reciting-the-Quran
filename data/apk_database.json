@@ -1,8 +1,8 @@
 {
   "appId": "com.murtal.smartquran",
   "appName": "مرتل القرآن الذكي - نظام التجويد والحفظ",
-  "version": "1.0.0",
-  "versionCode": 100,
+  "version": "1.1.0",
+  "versionCode": 110,
   "filename": "murtal-quran.apk",
   "downloadUrl": "/downloads/murtal-quran.apk",
   "apiUrl": "/api/apk/download",
@@ -10,7 +10,7 @@
   "fileSizeFormatted": "3.8 ميجابايت",
   "sha256": "7e25a047793d9bd7ca8d6aa9db84773d197791e7a8805a0a1b9b4dd32bd19ce3",
   "releaseDate": "2026-11-26",
-  "minAndroid": "Android 8.0 (Oreo) أو أحدث",
+  "minAndroid": "Android 7.0 (Nougat) أو أحدث",
   "targetAndroid": "Android 14 / 15 (API 34+)",
   "downloadCount": 184,
   "bundledDatabaseStats": {

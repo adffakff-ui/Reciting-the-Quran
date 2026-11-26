@@ -1,6 +1,8 @@
 import { QURAN_SURAHS, RECITERS, Surah, getReciterAyahAudioUrl, getReciterBasmalahAudioUrl } from '../data/quranData';
 import { ADHKAR_LIST, ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
 
+export const APP_VERSION = '1.1.0';
+export const APP_VERSION_CODE = 110;
 export const AUDIO_CACHE_NAME = 'quran-audio-cache';
 const IDB_NAME = 'murtal_offline_db';
 const IDB_VERSION = 1;
@@ -20,6 +22,13 @@ export const BACKUP_LOCAL_STORAGE_KEYS = [
   'mushaf_speed',
   'adhkar_sheikh_id',
   'adhkar_playback_speed',
+  'shatibiyyah_saved_abyat',
+  'shatibiyyah_memorized_abyat',
+  'jazariyyah_saved_abyat',
+  'jazariyyah_memorized_abyat',
+  'hisn_counters',
+  'hisn_favorites',
+  'murtal_reciter_preferences',
 ] as const;
 
 export interface BackupStats {
@@ -143,6 +152,7 @@ export function computeBackupStats(data: Record<string, string>): BackupStats {
     'mushaf_speed',
     'adhkar_sheikh_id',
     'adhkar_playback_speed',
+    'murtal_reciter_preferences',
   ];
   settingsCount = settingKeys.filter((k) => data[k] !== undefined).length;
 
