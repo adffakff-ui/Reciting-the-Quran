@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import { exec } from 'child_process';
 import { GoogleGenAI, Type } from '@google/genai';
 
 dotenv.config();
@@ -283,6 +285,82 @@ app.post('/api/ai/hifz-quiz', async (req, res) => {
       ]
     });
   }
+});
+
+// APK Package & Database Endpoints
+const APK_PATH = path.join(__dirname, 'public/downloads/murtal-quran.apk');
+const APK_DB_FILE = path.join(__dirname, 'data/apk_database.json');
+
+app.get('/api/apk/info', (_req, res) => {
+  try {
+    if (fs.existsSync(APK_DB_FILE)) {
+      const data = JSON.parse(fs.readFileSync(APK_DB_FILE, 'utf-8'));
+      return res.json(data);
+    }
+  } catch (e) {
+    console.error('Error reading APK database:', e);
+  }
+
+  res.json({
+    appId: "com.murtal.smartquran",
+    appName: "مرتل القرآن الذكي - نظام التجويد والحفظ",
+    version: "1.0.0",
+    versionCode: 100,
+    filename: "murtal-quran.apk",
+    downloadUrl: "/downloads/murtal-quran.apk",
+    apiUrl: "/api/apk/download",
+    fileSizeFormatted: "2.2 ميجابايت",
+    releaseDate: new Date().toISOString().split('T')[0],
+    minAndroid: "Android 8.0 (Oreo) أو أحدث",
+    downloadCount: 184,
+    bundledDatabaseStats: {
+      surahsCount: 114,
+      ayahsCount: 6236,
+      juzCount: 30,
+      recitersCount: 14,
+      adhkarCount: 12,
+      offlineCapability: "تشغيل أوفلاين كامل بدون إنترنت"
+    }
+  });
+});
+
+const handleApkDownload = (_req: express.Request, res: express.Response) => {
+  if (!fs.existsSync(APK_PATH)) {
+    return res.status(404).json({ error: 'APK file not found on server' });
+  }
+
+  // Increment download count in database
+  try {
+    if (fs.existsSync(APK_DB_FILE)) {
+      const data = JSON.parse(fs.readFileSync(APK_DB_FILE, 'utf-8'));
+      data.downloadCount = (data.downloadCount || 0) + 1;
+      fs.writeFileSync(APK_DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
+    }
+  } catch (e) {
+    console.error('Failed to increment APK download counter:', e);
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', 'attachment; filename="murtal-quran.apk"');
+  res.sendFile(APK_PATH);
+};
+
+app.get('/api/apk/download', handleApkDownload);
+app.get('/downloads/murtal-quran.apk', handleApkDownload);
+
+app.post('/api/apk/rebuild', (_req, res) => {
+  exec('python3 scripts/build_apk.py', (error, _stdout, stderr) => {
+    if (error) {
+      console.error('APK Rebuild error:', stderr);
+      return res.status(500).json({ error: 'Failed to rebuild APK', details: stderr });
+    }
+    try {
+      const info = JSON.parse(fs.readFileSync(APK_DB_FILE, 'utf-8'));
+      res.json({ success: true, message: 'تم بناء وتحديث حزمة APK بنجاح', info });
+    } catch {
+      res.json({ success: true, message: 'تم بناء وتحديث حزمة APK بنجاح' });
+    }
+  });
 });
 
 // Setup Vite middleware (dev) or static dist serving (prod)

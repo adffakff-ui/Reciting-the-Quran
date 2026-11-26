@@ -17,6 +17,13 @@ import {
   X,
   BookOpen,
   Sun,
+  Smartphone,
+  Package,
+  RefreshCw,
+  Copy,
+  Check,
+  Layers,
+  FileCheck,
 } from 'lucide-react';
 import { QURAN_SURAHS, RECITERS } from '../data/quranData';
 import { ADHKAR_SHEIKHS } from '../data/adhkarData';
