@@ -527,7 +527,7 @@ export const JazariyyahView: React.FC = () => {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 sm:space-y-7 animate-fadeIn w-full max-w-full overflow-x-hidden">
+    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 sm:space-y-7 animate-fadeIn w-full max-w-full overflow-x-clip">
       {/* Header Banner */}
       <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl bg-gradient-to-br from-teal-950 via-slate-900 to-emerald-950/60 border border-emerald-500/30 shadow-2xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
@@ -712,7 +712,7 @@ export const JazariyyahView: React.FC = () => {
         if (!activeEntry) return null;
         const pct = Math.round(((activeIdx + 1) / Math.max(1, activePlayableList.length)) * 100);
         return (
-          <div className="sticky top-[104px] lg:top-[84px] z-30 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-amber-400/50 shadow-2xl space-y-2.5 animate-fadeIn">
+          <div className="sticky top-[var(--murtal-header-offset,104px)] z-30 p-3.5 sm:p-4 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-amber-400/50 shadow-2xl space-y-2.5 animate-fadeIn">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shrink-0">

@@ -542,7 +542,7 @@ export const AdhkarView: React.FC = () => {
   const activePlayingItem = filteredAdhkar.find(d => d.id === playingDhikrId);
 
   return (
-    <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-hidden">
+    <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-x-clip">
       {/* Banner */}
       <div className="p-4 sm:p-8 rounded-2xl sm:rounded-3xl bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 border border-emerald-500/30 shadow-2xl relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-4 sm:gap-6">
         <div className="absolute top-0 right-0 w-80 h-80 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -785,7 +785,7 @@ export const AdhkarView: React.FC = () => {
         const activeIdx = filteredAdhkar.findIndex(d => d.id === activePlayingItem.id);
         const progressRatio = activeIdx >= 0 ? Math.round(((activeIdx + 1) / Math.max(1, filteredAdhkar.length)) * 100) : 0;
         return (
-          <div className="sticky top-[104px] lg:top-[84px] z-30 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-teal-950/95 backdrop-blur-md border border-emerald-500/50 shadow-2xl space-y-2.5 animate-fadeIn">
+          <div className="sticky top-[var(--murtal-header-offset,104px)] z-30 p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-950/95 via-slate-900/95 to-teal-950/95 backdrop-blur-md border border-emerald-500/50 shadow-2xl space-y-2.5 animate-fadeIn">
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 {/* Audio Wave Icon */}

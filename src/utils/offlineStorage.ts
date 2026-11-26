@@ -4,8 +4,8 @@ import { SHATIBIYYAH_CHAPTERS, SHATIBIYYAH_SYMBOLS, SEVEN_QURRA } from '../data/
 import { JAZARIYYAH_CHAPTERS, MAKHARIJ_GROUPS, SIFAT_OPPOSITES, SIFAT_NON_OPPOSITES } from '../data/jazariyyahData';
 import { HISN_CATEGORIES } from '../data/hisnAlMuslimData';
 
-export const APP_VERSION = '1.1.0';
-export const APP_VERSION_CODE = 110;
+export const APP_VERSION = '1.2.0';
+export const APP_VERSION_CODE = 120;
 export const AUDIO_CACHE_NAME = 'quran-audio-cache';
 export const BOOKS_CACHE_NAME = 'murtal-offline-books-v1';
 const IDB_NAME = 'murtal_offline_db';
@@ -33,6 +33,7 @@ export const BACKUP_LOCAL_STORAGE_KEYS = [
   'hisn_counters',
   'hisn_favorites',
   'murtal_reciter_preferences',
+  'murtal_nav_preferences',
 ] as const;
 
 export interface BackupStats {

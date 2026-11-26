@@ -74,6 +74,21 @@ public class MainActivity extends Activity {
         }
     }
 
+    private class AndroidAppBridge {
+        @JavascriptInterface
+        public void exitApp() {
+            runOnUiThread(() -> {
+                if (tts != null) {
+                    try {
+                        tts.stop();
+                    } catch (Exception ignored) {
+                    }
+                }
+                finishAffinity();
+            });
+        }
+    }
+
     private void notifyJsTtsCallback(final String fnName, final String token) {
         if (webView == null) return;
         final String safeToken = token != null ? token.replaceAll("[^a-zA-Z0-9_-]", "") : "";
@@ -150,6 +165,7 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
 
         webView.addJavascriptInterface(new AndroidTTSBridge(), "AndroidTTS");
+        webView.addJavascriptInterface(new AndroidAppBridge(), "AndroidApp");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override

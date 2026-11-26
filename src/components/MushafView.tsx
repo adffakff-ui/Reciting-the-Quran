@@ -804,7 +804,7 @@ export const MushafView: React.FC<MushafViewProps> = ({
   const activeReciterObj = RECITERS.find(r => r.identifier === selectedReciter) || RECITERS[0];
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8 animate-fadeIn w-full overflow-hidden">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-6 sm:space-y-8 animate-fadeIn w-full overflow-x-clip">
       {selectedSurah ? (
         /* Surah Reader View */
         <div className="space-y-4 sm:space-y-6">
@@ -988,7 +988,7 @@ export const MushafView: React.FC<MushafViewProps> = ({
 
           {/* Active Sequential Player Sticky Bar (When playing) */}
           {playingAyahNumber !== null && (
-            <div className="sticky top-[104px] lg:top-[84px] z-30 p-3 sm:p-4 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-emerald-500/50 shadow-2xl space-y-2.5 animate-fadeIn">
+            <div className="sticky top-[var(--murtal-header-offset,104px)] z-30 p-3 sm:p-4 rounded-2xl bg-slate-900/95 backdrop-blur-md border border-emerald-500/50 shadow-2xl space-y-2.5 animate-fadeIn">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-950/50">

@@ -27,8 +27,8 @@ SERVER_DATA_DIR = os.path.join(BASE_DIR, 'data')
 ANDROID_SRC_DIR = os.path.join(BASE_DIR, 'android', 'app', 'src', 'main')
 
 APK_FILENAME = 'murtal-quran.apk'
-APP_VERSION_NAME = '1.1.0'
-APP_VERSION_CODE = 110
+APP_VERSION_NAME = '1.2.0'
+APP_VERSION_CODE = 120
 APK_PATH = os.path.join(OUTPUT_DIR, APK_FILENAME)
 DIST_APK_PATH = os.path.join(DIST_DIR, 'downloads', APK_FILENAME)
 
@@ -155,7 +155,7 @@ def build_apk_info_dict(apk_size: int, apk_sha256: str):
             "ayahsCount": 6236,
             "juzCount": 30,
             "recitersCount": 14,
-            "adhkarCount": 12,
+            "adhkarCount": 17,
             "shatibiyyahChaptersCount": 6,
             "shatibiyyahAbyatCount": 25,
             "jazariyyahChaptersCount": 4,

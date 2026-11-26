@@ -855,10 +855,10 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
   const isCurrentAyahBookmarked = bookmarks.includes(ayahBookmarkKey);
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-hidden">
+    <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-8 animate-fadeIn w-full overflow-x-clip">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs sm:text-sm shadow-2xl animate-bounce">
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[80] px-4 py-2.5 rounded-2xl bg-emerald-600 text-white font-bold text-xs sm:text-sm shadow-2xl animate-bounce">
           {toastMessage}
         </div>
       )}
