@@ -249,16 +249,38 @@ function clearTimedFallback(): void {
   timedFallbackCallback = null;
 }
 
-function splitArabicIntoSegments(cleanedText: string, maxLen = 150): string[] {
+function splitArabicIntoSegments(cleanedText: string, maxLen = 140): string[] {
   if (cleanedText.length <= maxLen) return [cleanedText];
   const rawParts = cleanedText
     .split(/(?<=[.،؛:!؟])\s+/)
     .map((p) => p.trim())
     .filter(Boolean);
 
+  // Break any overlong unpunctuated part at word boundaries so Chrome never hits the ~15s TTS cutoff
+  const boundedParts: string[] = [];
+  for (const part of rawParts) {
+    if (part.length <= maxLen) {
+      boundedParts.push(part);
+      continue;
+    }
+    const words = part.split(/\s+/);
+    let chunk = '';
+    for (const word of words) {
+      if (!chunk) {
+        chunk = word;
+      } else if (chunk.length + word.length + 1 <= maxLen) {
+        chunk = `${chunk} ${word}`;
+      } else {
+        boundedParts.push(chunk);
+        chunk = word;
+      }
+    }
+    if (chunk) boundedParts.push(chunk);
+  }
+
   const merged: string[] = [];
   let buffer = '';
-  for (const part of rawParts) {
+  for (const part of boundedParts) {
     if (!buffer) {
       buffer = part;
     } else if (buffer.length + part.length + 1 <= maxLen) {
@@ -272,21 +294,27 @@ function splitArabicIntoSegments(cleanedText: string, maxLen = 150): string[] {
   return merged.length > 0 ? merged : [cleanedText];
 }
 
-function pickBestArabicVoice(): SpeechSynthesisVoice | null {
+function pickBestArabicVoice(sheikh?: AdhkarSheikh): SpeechSynthesisVoice | null {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
   const voices = window.speechSynthesis.getVoices();
+  const arabicVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('ar'));
+  if (arabicVoices.length === 0) return null;
+
+  const preferredMaleOrNatural = arabicVoices.filter((v) =>
+    /Maged|Tarik|Tarık|Naayf|Natural|Microsoft|Google|Arabic/i.test(v.name)
+  );
+  const pool = preferredMaleOrNatural.length > 0 ? preferredMaleOrNatural : arabicVoices;
+
+  if (sheikh && pool.length > 1) {
+    const idx = ADHKAR_SHEIKHS.findIndex((s) => s.id === sheikh.id);
+    if (idx >= 0) {
+      return pool[idx % pool.length];
+    }
+  }
+
   return (
-    voices.find(
-      (v) =>
-        v.lang.startsWith('ar') &&
-        (v.name.includes('Arabic') ||
-          v.name.includes('Natural') ||
-          v.name.includes('Maged') ||
-          v.name.includes('Tarık') ||
-          v.name.includes('Hoda') ||
-          v.name.includes('Naayf'))
-    ) ||
-    voices.find((v) => v.lang.startsWith('ar')) ||
+    pool.find((v) => v.lang.toLowerCase() === 'ar-sa') ||
+    pool[0] ||
     null
   );
 }
@@ -382,7 +410,8 @@ export function speakArabicWithSheikh(
       : onEndOrOptions || {};
 
   const cleaned = text
-    .replace(/[۝۞۩﴿﴾]/g, '')
+    .replace(/ﷺ/g, 'صلى الله عليه وسلم')
+    .replace(/[\u06D6-\u06ED۝۞۩﴿﴾]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -466,7 +495,7 @@ export function speakArabicWithSheikh(
 
       const utterance = new SpeechSynthesisUtterance(segments[segIndex]);
       utterance.lang = 'ar-SA';
-      const arabicVoice = pickBestArabicVoice();
+      const arabicVoice = pickBestArabicVoice(sheikh);
       if (arabicVoice) utterance.voice = arabicVoice;
       utterance.pitch = effectivePitch;
       utterance.rate = effectiveRate;

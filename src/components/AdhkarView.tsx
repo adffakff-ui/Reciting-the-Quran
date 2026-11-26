@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sun, Moon, CheckCircle2, RotateCcw, Volume2, 
   Pause, Play, Square, SkipForward, SkipBack, Gauge, 
-  Headphones, UserCheck, Check, Radio, Star
+  Headphones, UserCheck, Check, Radio, Star, Layers
 } from 'lucide-react';
 import { ADHKAR_LIST, ADHKAR_SHEIKHS, DhikrItem, AdhkarSheikh } from '../data/adhkarData';
 import { prefetchAudioToCache, resolvePlayableAudioSrc } from '../utils/offlineStorage';
@@ -11,8 +11,13 @@ import {
   formatSheikhOptionLabel,
   getReciterPreferences,
   getSheikhById,
+  pauseArabicSpeech,
+  resumeArabicSpeech,
+  setAllDefaultsToReciter,
   setSectionDefaultReciter,
   sortWithFavoritesFirst,
+  speakArabicWithSheikh,
+  stopArabicSpeech,
   toggleFavoriteReciter,
 } from '../utils/reciterPreferences';
 import confetti from 'canvas-confetti';
@@ -54,15 +59,14 @@ export const AdhkarView: React.FC = () => {
   const [autoIncrementCounter, setAutoIncrementCounter] = useState(true);
   const [skipCompletedInSequence, setSkipCompletedInSequence] = useState(false);
   const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [reciterNotice, setReciterNotice] = useState<string | null>(null);
 
   // References to avoid stale closures inside audio callbacks
   const isCancelledRef = useRef(false);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const currentRevokeRef = useRef<(() => void) | null>(null);
   const preloadedAudioRef = useRef<{ url: string; audio: HTMLAudioElement } | null>(null);
-  const speechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
-  const speechPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const speechSessionTokenRef = useRef(0);
+  const nextStepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedSheikhRef = useRef(selectedSheikh);
   const playbackSpeedRef = useRef(playbackSpeed);
   const autoIncrementRef = useRef(autoIncrementCounter);
@@ -146,37 +150,10 @@ export const AdhkarView: React.FC = () => {
     setCounters(prev => ({ ...prev, [id]: 0 }));
   };
 
-  // Helper to clean Arabic text for Speech Synthesis
-  const sanitizeForSpeech = (text: string) => {
-    return text
-      .replace(/[۝۞۩]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
-
-  // Find best Arabic voice
-  const getArabicVoice = (): SpeechSynthesisVoice | null => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return null;
-    const voices = window.speechSynthesis.getVoices();
-    return (
-      voices.find(v => v.lang.startsWith('ar') && (v.name.includes('Arabic') || v.name.includes('Natural') || v.name.includes('Maged') || v.name.includes('Tarık'))) ||
-      voices.find(v => v.lang.startsWith('ar')) ||
-      null
-    );
-  };
-
-  // Stop Audio Completely
-  const stopAudio = () => {
-    isCancelledRef.current = true;
-    speechSessionTokenRef.current += 1;
-    if (speechPendingTimerRef.current !== null) {
-      clearTimeout(speechPendingTimerRef.current);
-      speechPendingTimerRef.current = null;
-    }
-    if (speechUtteranceRef.current) {
-      speechUtteranceRef.current.onend = null;
-      speechUtteranceRef.current.onerror = null;
-      speechUtteranceRef.current = null;
+  const clearActiveAudioAndTimers = () => {
+    if (nextStepTimerRef.current !== null) {
+      clearTimeout(nextStepTimerRef.current);
+      nextStepTimerRef.current = null;
     }
     if (currentAudioRef.current) {
       currentAudioRef.current.onended = null;
@@ -188,14 +165,16 @@ export const AdhkarView: React.FC = () => {
       currentRevokeRef.current();
       currentRevokeRef.current = null;
     }
+    stopArabicSpeech();
+  };
+
+  // Stop Audio Completely
+  const stopAudio = () => {
+    isCancelledRef.current = true;
+    clearActiveAudioAndTimers();
     if (preloadedAudioRef.current) {
       preloadedAudioRef.current.audio.src = '';
       preloadedAudioRef.current = null;
-    }
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
     }
     setPlayingDhikrId(null);
     setIsAutoplayingAll(false);
@@ -273,27 +252,7 @@ export const AdhkarView: React.FC = () => {
 
     // Cancel previous audio without losing autoplay state when requested
     isCancelledRef.current = true;
-    speechSessionTokenRef.current += 1;
-    if (speechPendingTimerRef.current !== null) {
-      clearTimeout(speechPendingTimerRef.current);
-      speechPendingTimerRef.current = null;
-    }
-    if (speechUtteranceRef.current) {
-      speechUtteranceRef.current.onend = null;
-      speechUtteranceRef.current.onerror = null;
-      speechUtteranceRef.current = null;
-    }
-    if (currentAudioRef.current) {
-      currentAudioRef.current.onended = null;
-      currentAudioRef.current.onerror = null;
-      currentAudioRef.current.pause();
-      currentAudioRef.current = null;
-    }
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
-    }
+    clearActiveAudioAndTimers();
 
     const activeSheikh = sheikhOverride || selectedSheikhRef.current;
     isCancelledRef.current = false;
@@ -341,7 +300,7 @@ export const AdhkarView: React.FC = () => {
         }
 
         if (currentRep < maxReps && !isCancelledRef.current) {
-          setTimeout(() => {
+          nextStepTimerRef.current = setTimeout(() => {
             if (!isCancelledRef.current) {
               setCurrentRepetition(currentRep + 1);
               playSheikhQuranAudio(item, currentRep + 1, maxReps, autoplaySequence, sheikh);
@@ -349,11 +308,11 @@ export const AdhkarView: React.FC = () => {
           }, 600);
         } else {
           if (autoplaySequence) {
-            setTimeout(() => {
+            nextStepTimerRef.current = setTimeout(() => {
               if (!isCancelledRef.current) {
                 moveToNextSequentialDhikr(item.id, sheikh);
               }
-            }, 1000);
+            }, 900);
           } else {
             setPlayingDhikrId(null);
             setIsAutoplayingAll(false);
@@ -420,7 +379,7 @@ export const AdhkarView: React.FC = () => {
     playNextAyah();
   };
 
-  // Sheikh Speech Audio player for Duas
+  // Unified Multi-Tier Sheikh Speech Audio player for ALL Duas & Adhkar (Android TTS + Segmented Web Speech + Timed Fallback)
   const playSheikhSpeechAudio = (
     item: DhikrItem,
     rep: number,
@@ -428,89 +387,43 @@ export const AdhkarView: React.FC = () => {
     autoplaySequence: boolean,
     sheikh: AdhkarSheikh
   ) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) {
-      setAudioNotice('متصفحك الحالي لا يدعم تشغيل القراءة الصوتية المباشرة للأدعية.');
-      setPlayingDhikrId(null);
-      setIsAutoplayingAll(false);
-      return;
-    }
     if (isCancelledRef.current) return;
-
     setCurrentRepetition(rep);
-    const cleanText = sanitizeForSpeech(item.text);
-    const myToken = ++speechSessionTokenRef.current;
-    const wasActive =
-      window.speechSynthesis.speaking || window.speechSynthesis.pending;
-    if (wasActive) {
-      try {
-        window.speechSynthesis.cancel();
-      } catch {}
-    }
 
-    const startSpeech = () => {
-      if (isCancelledRef.current || myToken !== speechSessionTokenRef.current) return;
-
-      const utterance = new SpeechSynthesisUtterance(cleanText);
-      utterance.lang = 'ar-SA';
-      utterance.rate = Math.max(0.5, Math.min(1.6, playbackSpeedRef.current * (sheikh.speechRate || 1.0)));
-      utterance.pitch = sheikh.speechPitch || 1.0;
-
-      const voice = getArabicVoice();
-      if (voice) utterance.voice = voice;
-
-      utterance.onend = () => {
-        if (isCancelledRef.current || myToken !== speechSessionTokenRef.current) return;
-        speechUtteranceRef.current = null;
-
+    speakArabicWithSheikh(item.text, sheikh, {
+      speedMultiplier: playbackSpeedRef.current,
+      allowTimedFallback: true,
+      onFallbackNotice: (msg) => setAudioNotice(msg),
+      onEnd: () => {
+        if (isCancelledRef.current) return;
         if (autoIncrementRef.current) {
           handleIncrement(item.id, item.count);
         }
 
         if (rep < maxReps && !isCancelledRef.current) {
-          setTimeout(() => {
-            if (!isCancelledRef.current && myToken === speechSessionTokenRef.current) {
+          nextStepTimerRef.current = setTimeout(() => {
+            if (!isCancelledRef.current) {
               playSheikhSpeechAudio(item, rep + 1, maxReps, autoplaySequence, sheikh);
             }
-          }, 600);
+          }, 550);
+        } else if (autoplaySequence) {
+          nextStepTimerRef.current = setTimeout(() => {
+            if (!isCancelledRef.current) {
+              moveToNextSequentialDhikr(item.id, sheikh);
+            }
+          }, 800);
         } else {
-          if (autoplaySequence) {
-            setTimeout(() => {
-              if (!isCancelledRef.current && myToken === speechSessionTokenRef.current) {
-                moveToNextSequentialDhikr(item.id, sheikh);
-              }
-            }, 1000);
-          } else {
-            setPlayingDhikrId(null);
-            setIsAutoplayingAll(false);
-            setCurrentRepetition(1);
-          }
-        }
-      };
-
-      utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
-        if (myToken !== speechSessionTokenRef.current) return;
-        if (event?.error === 'canceled' || event?.error === 'interrupted') {
-          return;
-        }
-        speechUtteranceRef.current = null;
-        if (!isCancelledRef.current) {
           setPlayingDhikrId(null);
           setIsAutoplayingAll(false);
+          setCurrentRepetition(1);
         }
-      };
-
-      speechUtteranceRef.current = utterance;
-      window.speechSynthesis.speak(utterance);
-    };
-
-    if (wasActive) {
-      speechPendingTimerRef.current = setTimeout(() => {
-        speechPendingTimerRef.current = null;
-        startSpeech();
-      }, 45);
-    } else {
-      startSpeech();
-    }
+      },
+      onError: () => {
+        if (!isCancelledRef.current) {
+          stopAudio();
+        }
+      },
+    });
   };
 
   // Move to Next Dhikr during Autoplay Sequence
@@ -586,7 +499,7 @@ export const AdhkarView: React.FC = () => {
   const handleTogglePause = () => {
     if (currentAudioRef.current) {
       if (isPaused) {
-        currentAudioRef.current.play();
+        currentAudioRef.current.play().catch(() => {});
         setIsPaused(false);
       } else {
         currentAudioRef.current.pause();
@@ -595,14 +508,13 @@ export const AdhkarView: React.FC = () => {
       return;
     }
 
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      if (isPaused) {
-        window.speechSynthesis.resume();
-        setIsPaused(false);
-      } else {
-        window.speechSynthesis.pause();
-        setIsPaused(true);
-      }
+    if (playingDhikrId === null) return;
+    if (isPaused) {
+      resumeArabicSpeech();
+      setIsPaused(false);
+    } else {
+      pauseArabicSpeech();
+      setIsPaused(true);
     }
   };
 
@@ -660,24 +572,26 @@ export const AdhkarView: React.FC = () => {
       {/* Sheikh Reciter Selection Box */}
       <div className="p-3.5 sm:p-5 rounded-2xl sm:rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
               <UserCheck className="w-4 h-4" />
             </div>
-            <div>
-              <h3 className="text-sm font-bold text-white">اختر الشيخ والقارئ للاستماع للأذكار:</h3>
-              <p className="text-[11px] text-slate-400">{selectedSheikh.description}</p>
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-white">اختر الشيخ والقارئ للاستماع لكافة الأذكار:</h3>
+              <p className="text-[11px] text-slate-400 truncate">
+                {selectedSheikh.name} · {selectedSheikh.description}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto sm:max-w-sm min-w-0">
             <select
               value={selectedSheikh.id}
               onChange={(e) => {
                 const found = ADHKAR_SHEIKHS.find(s => s.id === e.target.value);
                 if (found) handleSelectSheikh(found);
               }}
-              className="flex-1 sm:w-auto bg-slate-800 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer"
+              className="w-full min-w-0 flex-1 bg-slate-800 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer truncate"
             >
               {sortWithFavoritesFirst(ADHKAR_SHEIKHS, favoriteReciterIds).map((s) => (
                 <option key={s.id} value={s.id}>
@@ -701,6 +615,54 @@ export const AdhkarView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        <div className="flex items-center justify-between gap-2 flex-wrap pt-1 border-t border-slate-800/70">
+          <p className="text-[11px] text-emerald-300/90 font-semibold">
+            يدعم القراءة الصوتية المتكاملة لجميع الأذكار (الآيات القرآنية والأدعية النبوية كافة) دون استثناء
+          </p>
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                clearActiveAudioAndTimers();
+                setPlayingDhikrId(null);
+                setIsAutoplayingAll(false);
+                setIsPaused(false);
+                speakArabicWithSheikh(
+                  'أَصْبَحْنَا وَأَصْبَحَ الْمُلْكُ لِلَّهِ، وَالْحَمْدُ لِلَّهِ، لَا إِلَهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ.',
+                  selectedSheikh,
+                  {
+                    speedMultiplier: playbackSpeedRef.current,
+                    onFallbackNotice: (msg) => setAudioNotice(msg),
+                  }
+                );
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/40 text-emerald-300 text-[11px] font-bold cursor-pointer min-h-[36px] shrink-0"
+            >
+              <Volume2 className="w-3.5 h-3.5 shrink-0" />
+              <span>معاينة القراءة</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const updated = setAllDefaultsToReciter(selectedSheikh.id);
+                setFavoriteReciterIds(updated.favoriteReciterIds);
+                setReciterNotice(`تم اعتماد ${selectedSheikh.name} قارئاً افتراضياً لجميع الأقسام.`);
+                setTimeout(() => setReciterNotice(null), 3000);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 hover:border-emerald-500/40 text-slate-200 text-[11px] font-bold cursor-pointer min-h-[36px] shrink-0"
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-400" />
+              <span>اعتماد لجميع الأقسام</span>
+            </button>
+          </div>
+        </div>
+
+        {reciterNotice && (
+          <div className="px-3 py-2 rounded-xl bg-emerald-950/70 border border-emerald-500/35 text-emerald-200 text-xs font-semibold">
+            {reciterNotice}
+          </div>
+        )}
 
         {/* Quick Sheikh chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-1">
@@ -963,8 +925,8 @@ export const AdhkarView: React.FC = () => {
                   </span>
                   <div className="min-w-0">
                     <h3 className="text-lg sm:text-xl font-bold text-white font-quran truncate">{item.title}</h3>
-                    <span className="text-[10px] text-slate-400 block">
-                      {item.quranAyahNumbers ? 'آيات من القرآن الكريم' : 'دعاء نبوي مأثور'} • {item.category === 'morning' ? 'خاص بالصباح' : item.category === 'evening' ? 'خاص بالمساء' : 'الصباح والمساء'}
+                    <span className="text-[11px] text-slate-400 block">
+                      {item.quranAyahNumbers ? 'تلاوة قرآنية' : 'دعاء نبوي مأثور'} · {selectedSheikh.name} · {item.category === 'morning' ? 'الصباح' : item.category === 'evening' ? 'المساء' : 'الصباح والمساء'}
                     </span>
                   </div>
                 </div>

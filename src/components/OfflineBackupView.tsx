@@ -1105,7 +1105,7 @@ export const OfflineBackupView: React.FC = () => {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
               <Sun className="w-4 h-4" />
-              <span>تنزيل مقاطع أذكار الصباح والمساء بدون إنترنت (دعم كافة الشيوخ الـ {ADHKAR_SHEIKHS.length})</span>
+              <span>أذكار الصباح والمساء بدون إنترنت — تلاوة الآيات وقراءة كافة الأدعية (دعم الشيوخ الـ {ADHKAR_SHEIKHS.length})</span>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

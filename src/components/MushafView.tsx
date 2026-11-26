@@ -839,12 +839,12 @@ export const MushafView: React.FC<MushafViewProps> = ({
               </div>
 
               {/* Reciter and Listen Button */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
-                <div className="flex items-center gap-1.5 w-full sm:w-auto">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto min-w-0">
+                <div className="flex items-center gap-1.5 w-full sm:w-auto sm:max-w-xs min-w-0">
                   <select
                     value={selectedReciter}
                     onChange={(e) => handleReciterChange(e.target.value)}
-                    className="bg-slate-800 border border-emerald-500/30 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] flex-1 sm:w-auto cursor-pointer"
+                    className="w-full min-w-0 flex-1 bg-slate-800 border border-emerald-500/30 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-200 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[42px] cursor-pointer truncate"
                   >
                     {sortWithFavoritesFirst(RECITERS, favoriteReciterIds).map((r) => (
                       <option key={r.id} value={r.identifier}>

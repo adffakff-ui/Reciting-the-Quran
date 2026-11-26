@@ -15,8 +15,6 @@ import {
   XCircle,
   Volume2,
   Square,
-  Star,
-  UserCheck,
   Play,
   Pause,
   SkipForward,
@@ -26,23 +24,21 @@ import {
 } from 'lucide-react';
 import { HardDriveDownload, Download } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
+import { AdhkarSheikh } from '../data/adhkarData';
+import { SectionReciterBar } from './SectionReciterBar';
 import {
   exportStandaloneOfflineBookHtml,
   saveKnowledgeBookOfflineSnapshot,
 } from '../utils/offlineStorage';
 import {
   RECITER_PREFERENCES_EVENT,
-  formatSheikhOptionLabel,
   getReciterPreferences,
   getSheikhById,
   pauseArabicSpeech,
   resumeArabicSpeech,
   setSectionDefaultReciter,
-  sortWithFavoritesFirst,
   speakArabicWithSheikh,
   stopArabicSpeech,
-  toggleFavoriteReciter,
 } from '../utils/reciterPreferences';
 import {
   MAKHARIJ_GROUPS,
@@ -621,62 +617,32 @@ export const JazariyyahView: React.FC = () => {
       </div>
 
       {/* Preferred Sheikh Selector */}
-      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-            <UserCheck className="w-4 h-4" />
-          </div>
-          <div>
-            <p className="text-xs sm:text-sm font-bold text-white">القارئ الافتراضي لقراءة أبيات الجزرية:</p>
-            <p className="text-[11px] text-slate-400">{selectedSheikh.style}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <select
-            value={selectedSheikh.id}
-            onChange={(e) => {
-              const next = getSheikhById(e.target.value);
-              setSelectedSheikh(next);
-              selectedSheikhRef.current = next;
-              const updated = setSectionDefaultReciter('jazariyyah', next.id);
-              setFavoriteReciterIds(updated.favoriteReciterIds);
-              if (speakingBaytIdRef.current) {
-                const cur = activePlayableListRef.current.find(
-                  (item) => item.bayt.id === speakingBaytIdRef.current
-                );
-                if (cur) {
-                  playBaytSequence(
-                    cur.bayt,
-                    isAutoplayingAllRef.current || autoContinueRef.current,
-                    next
-                  );
-                }
-              }
-            }}
-            className="flex-1 sm:w-auto bg-slate-950 border border-emerald-500/35 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[40px] cursor-pointer"
-          >
-            {sortWithFavoritesFirst(ADHKAR_SHEIKHS, favoriteReciterIds).map((s) => (
-              <option key={s.id} value={s.id}>
-                {formatSheikhOptionLabel(s.name, s.style, favoriteReciterIds.includes(s.id))}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              const updated = toggleFavoriteReciter(selectedSheikh.id);
-              setFavoriteReciterIds(updated.favoriteReciterIds);
-            }}
-            className={`p-2 rounded-xl border min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer shrink-0 ${
-              favoriteReciterIds.includes(selectedSheikh.id)
-                ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
-                : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-amber-300'
-            }`}
-            title={favoriteReciterIds.includes(selectedSheikh.id) ? 'إزالة من المفضلة' : 'إضافة للمفضلة'}
-          >
-            <Star className={`w-4 h-4 ${favoriteReciterIds.includes(selectedSheikh.id) ? 'fill-current' : ''}`} />
-          </button>
-        </div>
-      </div>
+      <SectionReciterBar
+        sectionKey="jazariyyah"
+        sectionTitle="القارئ الافتراضي لقراءة أبيات الجزرية"
+        selectedSheikh={selectedSheikh}
+        favoriteReciterIds={favoriteReciterIds}
+        accent="emerald"
+        onPreferencesChange={(updated) => setFavoriteReciterIds(updated.favoriteReciterIds)}
+        onSelectSheikh={(next) => {
+          setSelectedSheikh(next);
+          selectedSheikhRef.current = next;
+          const updated = setSectionDefaultReciter('jazariyyah', next.id);
+          setFavoriteReciterIds(updated.favoriteReciterIds);
+          if (speakingBaytIdRef.current) {
+            const cur = activePlayableListRef.current.find(
+              (item) => item.bayt.id === speakingBaytIdRef.current
+            );
+            if (cur) {
+              playBaytSequence(
+                cur.bayt,
+                isAutoplayingAllRef.current || autoContinueRef.current,
+                next
+              );
+            }
+          }
+        }}
+      />
 
       {/* Sequential Master Playback Bar */}
       {(subTab === 'chapters' || subTab === 'saved') && (

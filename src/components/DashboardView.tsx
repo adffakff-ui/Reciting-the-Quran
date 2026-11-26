@@ -881,11 +881,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               return (
                 <div
                   key={sec.key}
-                  className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2"
+                  className="p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 space-y-2 min-w-0 overflow-hidden"
                 >
                   <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                     <Headphones className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span>{sec.label}</span>
+                    <span className="truncate">{sec.label}</span>
                   </label>
                   <select
                     value={sec.value}
@@ -895,7 +895,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       const rName = RECITERS.find((r) => r.id === e.target.value)?.name || '';
                       showPrefsNotice(`تم اعتماد ${rName} افتراضياً لقسم ${sec.label}`);
                     }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[40px] cursor-pointer"
+                    className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[40px] cursor-pointer truncate"
                   >
                     {sortedReciters.map((r) => {
                       const isFav = reciterPrefs.favoriteReciterIds.includes(r.id);

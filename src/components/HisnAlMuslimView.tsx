@@ -11,8 +11,6 @@ import {
   Check,
   Sparkles,
   BookOpen,
-  Star,
-  UserCheck,
   Play,
   Pause,
   SkipForward,
@@ -25,8 +23,9 @@ import {
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { HISN_CATEGORIES, HisnDhikr } from '../data/hisnAlMuslimData';
-import { ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
+import { AdhkarSheikh } from '../data/adhkarData';
 import { getReciterAyahAudioUrl } from '../data/quranData';
+import { SectionReciterBar } from './SectionReciterBar';
 import {
   downloadAudioPackOffline,
   exportStandaloneOfflineBookHtml,
@@ -36,16 +35,13 @@ import {
 } from '../utils/offlineStorage';
 import {
   RECITER_PREFERENCES_EVENT,
-  formatSheikhOptionLabel,
   getReciterPreferences,
   getSheikhById,
   pauseArabicSpeech,
   resumeArabicSpeech,
   setSectionDefaultReciter,
-  sortWithFavoritesFirst,
   speakArabicWithSheikh,
   stopArabicSpeech,
-  toggleFavoriteReciter,
 } from '../utils/reciterPreferences';
 
 const HISN_COUNTERS_KEY = 'hisn_counters';
@@ -390,8 +386,10 @@ export const HisnAlMuslimView: React.FC = () => {
     };
 
     // Authentic Sheikh MP3 audio when item is Ayat Al-Kursi (hw_4 -> Surah 2 Ayah 255)
-    if (item.id === 'hw_4' && activeSheikh.everyayahFolder) {
-      const ayahUrl = getReciterAyahAudioUrl(activeSheikh.everyayahFolder, 2, 255);
+    if (item.id === 'hw_4') {
+      const ayahUrl = activeSheikh.everyayahFolder
+        ? getReciterAyahAudioUrl(activeSheikh.everyayahFolder, 2, 255)
+        : `https://cdn.islamic.network/quran/audio/${activeSheikh.bitrate || 128}/${activeSheikh.subfolder}/262.mp3`;
       resolvePlayableAudioSrc(ayahUrl)
         .then(({ src, revoke }) => {
           if (isCancelledRef.current) {
@@ -620,63 +618,33 @@ export const HisnAlMuslimView: React.FC = () => {
       </div>
 
       {/* Preferred Sheikh Selector */}
-      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-            <UserCheck className="w-4 h-4" />
-          </div>
-          <div>
-            <p className="text-xs sm:text-sm font-bold text-white">القارئ الافتراضي لقراءة حصن المسلم:</p>
-            <p className="text-[11px] text-slate-400">{selectedSheikh.style}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <select
-            value={selectedSheikh.id}
-            onChange={(e) => {
-              const next = getSheikhById(e.target.value);
-              setSelectedSheikh(next);
-              selectedSheikhRef.current = next;
-              const updated = setSectionDefaultReciter('hisn', next.id);
-              setFavoriteReciterIds(updated.favoriteReciterIds);
-              if (speakingIdRef.current) {
-                const entry = flattenedItemsRef.current.find(
-                  (it) => it.item.id === speakingIdRef.current
-                );
-                if (entry) {
-                  playHisnItem(
-                    entry.item,
-                    currentRepRef.current,
-                    isAutoplayingAllRef.current || autoContinueRef.current,
-                    next
-                  );
-                }
-              }
-            }}
-            className="flex-1 sm:w-auto bg-slate-950 border border-emerald-500/35 rounded-xl px-3 py-2 text-xs sm:text-sm text-emerald-300 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[40px] cursor-pointer"
-          >
-            {sortWithFavoritesFirst(ADHKAR_SHEIKHS, favoriteReciterIds).map((s) => (
-              <option key={s.id} value={s.id}>
-                {formatSheikhOptionLabel(s.name, s.style, favoriteReciterIds.includes(s.id))}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => {
-              const updated = toggleFavoriteReciter(selectedSheikh.id);
-              setFavoriteReciterIds(updated.favoriteReciterIds);
-            }}
-            className={`p-2 rounded-xl border min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer shrink-0 ${
-              favoriteReciterIds.includes(selectedSheikh.id)
-                ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
-                : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-amber-300'
-            }`}
-            title={favoriteReciterIds.includes(selectedSheikh.id) ? 'إزالة من المفضلة' : 'إضافة للمفضلة'}
-          >
-            <Star className={`w-4 h-4 ${favoriteReciterIds.includes(selectedSheikh.id) ? 'fill-current' : ''}`} />
-          </button>
-        </div>
-      </div>
+      <SectionReciterBar
+        sectionKey="hisn"
+        sectionTitle="القارئ الافتراضي لقراءة حصن المسلم"
+        selectedSheikh={selectedSheikh}
+        favoriteReciterIds={favoriteReciterIds}
+        accent="teal"
+        onPreferencesChange={(updated) => setFavoriteReciterIds(updated.favoriteReciterIds)}
+        onSelectSheikh={(next) => {
+          setSelectedSheikh(next);
+          selectedSheikhRef.current = next;
+          const updated = setSectionDefaultReciter('hisn', next.id);
+          setFavoriteReciterIds(updated.favoriteReciterIds);
+          if (speakingIdRef.current) {
+            const entry = flattenedItemsRef.current.find(
+              (it) => it.item.id === speakingIdRef.current
+            );
+            if (entry) {
+              playHisnItem(
+                entry.item,
+                currentRepRef.current,
+                isAutoplayingAllRef.current || autoContinueRef.current,
+                next
+              );
+            }
+          }
+        }}
+      />
 
       {/* Sequential Master Playback Bar */}
       <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900 border border-emerald-500/25 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-lg">
@@ -698,7 +666,7 @@ export const HisnAlMuslimView: React.FC = () => {
             ) : (
               <>
                 <Play className="w-4 h-4 fill-current" />
-                <span>تشغيل حصن المسلم متتابعاً ({flattenedItems.length} ذكراً)</span>
+                <span className="truncate">تشغيل كافة أذكار حصن المسلم ({flattenedItems.length}) · {selectedSheikh.name}</span>
               </>
             )}
           </button>
@@ -925,29 +893,40 @@ export const HisnAlMuslimView: React.FC = () => {
                       }`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-sm sm:text-base font-bold text-emerald-300">
-                            {item.title}
-                          </h4>
-                          <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-slate-400">
-                            {item.reference}
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm sm:text-base font-bold text-emerald-300">
+                              {item.title}
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-slate-400">
+                              {item.reference}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400 block truncate">
+                            {item.id === 'hw_4' ? 'تلاوة قرآنية' : 'قراءة مأثورة'} · {selectedSheikh.name}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             onClick={() => handleSpeak(item)}
-                            className={`p-2 rounded-xl border cursor-pointer min-h-[34px] min-w-[34px] flex items-center justify-center ${
+                            className={`px-2.5 py-2 rounded-xl border cursor-pointer min-h-[36px] flex items-center justify-center gap-1.5 text-xs font-bold ${
                               isSpeaking
                                 ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
                                 : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
                             }`}
-                            title={isSpeaking ? 'إيقاف القراءة' : 'استماع للذكر'}
+                            title={isSpeaking ? 'إيقاف القراءة' : `استماع بصوت ${selectedSheikh.name}`}
                           >
                             {isSpeaking ? (
-                              <Square className="w-3.5 h-3.5 fill-current" />
+                              <>
+                                <Square className="w-3.5 h-3.5 fill-current" />
+                                <span>إيقاف</span>
+                              </>
                             ) : (
-                              <Volume2 className="w-3.5 h-3.5" />
+                              <>
+                                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>استماع</span>
+                              </>
                             )}
                           </button>
 
