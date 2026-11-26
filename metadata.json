@@ -1,0 +1,8 @@
+{
+  "name": "مرتل القرآن الذكي - نظام التجويد والحفظ",
+  "description": "نظام متكامل لترتيل القرآن الكريم، تحسين التجويد، التدبر، وحفظ الآيات عبر الذكاء الاصطناعي.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
