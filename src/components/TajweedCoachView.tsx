@@ -220,6 +220,53 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
   // Toast / notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Saved Tajweed Ayahs (localStorage: coach_saved_ayahs)
+  const [savedTajweedAyahs, setSavedTajweedAyahs] = useState<Array<{
+    key: string;
+    surahName: string;
+    ayahNumber: number;
+    ayahText: string;
+    date: string;
+  }>>(() => {
+    try {
+      const saved = localStorage.getItem('coach_saved_ayahs');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('coach_saved_ayahs', JSON.stringify(savedTajweedAyahs));
+    } catch {}
+  }, [savedTajweedAyahs]);
+
+  const toggleSaveCurrentAyah = () => {
+    const key = `${selectedSurah.number}:${selectedAyahNumber}`;
+    setSavedTajweedAyahs(prev => {
+      const exists = prev.some(item => item.key === key);
+      if (exists) {
+        showToast('تمت إزالة الآية من قائمة الآيات المميزة.');
+        return prev.filter(item => item.key !== key);
+      } else {
+        const newItem = {
+          key,
+          surahName: selectedSurah.name,
+          ayahNumber: selectedAyahNumber,
+          ayahText: rawAyahText,
+          date: new Date().toLocaleDateString('ar-SA')
+        };
+        showToast('تمت إضافة الآية إلى آيات التجويد المميزة للمراجعة!');
+        return [newItem, ...prev];
+      }
+    });
+  };
+
+  const isCurrentAyahCoachSaved = savedTajweedAyahs.some(item => item.key === `${selectedSurah.number}:${selectedAyahNumber}`);
+
   // Refs
   const recognitionRef = useRef<any>(null);
   const modelAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -966,6 +1013,19 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
             >
               <Layers className="w-4 h-4" />
             </button>
+
+            <button
+              onClick={toggleSaveCurrentAyah}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer min-h-[38px] ${
+                isCurrentAyahCoachSaved
+                  ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300 shadow-md'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+              }`}
+              title="حفظ الآية في قائمة آيات التجويد المميزة"
+            >
+              <Award className={`w-4 h-4 ${isCurrentAyahCoachSaved ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <span className="hidden sm:inline">{isCurrentAyahCoachSaved ? 'محفوظة بالتجويد' : 'حفظ كآية مميزة'}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -1349,6 +1409,61 @@ export const TajweedCoachView: React.FC<TajweedCoachViewProps> = ({
           ) : null}
         </div>
       )}
+
+      {/* Saved Tajweed Ayahs Review Section */}
+      <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 space-y-6 shadow-xl">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+          <h3 className="text-lg sm:text-xl font-bold text-white font-quran flex items-center gap-2">
+            <Award className="w-5 h-5 text-emerald-400" />
+            <span>آيات التجويد المميزة المحفوظة للمراجعة ({savedTajweedAyahs.length})</span>
+          </h3>
+          <span className="text-xs text-slate-400">محفوظة محلياً في جهازك</span>
+        </div>
+
+        {savedTajweedAyahs.length === 0 ? (
+          <div className="py-10 text-center text-slate-400 text-sm">
+            لا توجد آيات محفوظة في قسم المعلم الذكي حالياً. اضغط على زر <strong className="text-emerald-400">«حفظ كآية مميزة»</strong> أعلى الصفحة لإضافتها هنا والمراجعة في أي وقت.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {savedTajweedAyahs.map((item) => (
+              <div
+                key={item.key}
+                className="p-5 rounded-2xl bg-slate-950/80 border border-emerald-500/30 space-y-3 flex flex-col justify-between hover:border-emerald-500/60 transition-all shadow-md"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-emerald-400">سورة {item.surahName} - آية {item.ayahNumber}</span>
+                    <span className="text-[10px] text-slate-400">({item.date})</span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedSurahName(item.surahName);
+                      setSelectedAyahNumber(item.ayahNumber);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className="px-3 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    تدرب عليها الآن
+                  </button>
+                </div>
+                <p className="font-quran text-lg text-slate-100 line-clamp-2 leading-relaxed">{item.ayahText}</p>
+                <div className="flex items-center justify-end pt-2 border-t border-slate-800/80">
+                  <button
+                    onClick={() => {
+                      setSavedTajweedAyahs(prev => prev.filter(x => x.key !== item.key));
+                      showToast('تمت إزالة الآية من القائمة المميزة.');
+                    }}
+                    className="text-xs text-rose-400 hover:text-rose-300 cursor-pointer font-semibold"
+                  >
+                    إزالة من القائمة
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

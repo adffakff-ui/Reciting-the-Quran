@@ -11,6 +11,7 @@ export const BACKUP_LOCAL_STORAGE_KEYS = [
   'quran_bookmarks',
   'hifz_spaced_cards',
   'hifz_memorized_surahs',
+  'coach_saved_ayahs',
   'adhkar_counters',
   'mushaf_reciter',
   'mushaf_auto_continue',
@@ -27,6 +28,7 @@ export interface BackupStats {
   adhkarCountersCount: number;
   settingsCount: number;
   memorizedSurahsCount?: number;
+  coachSavedAyahsCount?: number;
 }
 
 export interface BackupPayload {
@@ -80,6 +82,7 @@ export function computeBackupStats(data: Record<string, string>): BackupStats {
   let adhkarCountersCount = 0;
   let settingsCount = 0;
   let memorizedSurahsCount = 0;
+  let coachSavedAyahsCount = 0;
 
   try {
     if (data.quran_bookmarks) {
@@ -99,6 +102,13 @@ export function computeBackupStats(data: Record<string, string>): BackupStats {
     if (data.hifz_memorized_surahs) {
       const parsed = JSON.parse(data.hifz_memorized_surahs);
       if (Array.isArray(parsed)) memorizedSurahsCount = parsed.length;
+    }
+  } catch {}
+
+  try {
+    if (data.coach_saved_ayahs) {
+      const parsed = JSON.parse(data.coach_saved_ayahs);
+      if (Array.isArray(parsed)) coachSavedAyahsCount = parsed.length;
     }
   } catch {}
 
@@ -128,6 +138,7 @@ export function computeBackupStats(data: Record<string, string>): BackupStats {
     adhkarCountersCount,
     settingsCount,
     memorizedSurahsCount,
+    coachSavedAyahsCount,
   };
 }
 

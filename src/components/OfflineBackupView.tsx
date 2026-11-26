@@ -506,7 +506,8 @@ export const OfflineBackupView: React.FC = () => {
             <p className="text-xs text-slate-300">
               تحتوي على {pendingImport.stats.bookmarksCount} آية مفضلة،{' '}
               {pendingImport.stats.spacedCardsCount} بطاقة حفظ،{' '}
-              {pendingImport.stats.memorizedSurahsCount ? `${pendingImport.stats.memorizedSurahsCount} سورة محفوظة، ` : ''}و{' '}
+              {pendingImport.stats.memorizedSurahsCount ? `${pendingImport.stats.memorizedSurahsCount} سورة محفوظة، ` : ''}
+              {pendingImport.stats.coachSavedAyahsCount ? `${pendingImport.stats.coachSavedAyahsCount} آية تجويد محفوظة، ` : ''}و{' '}
               {pendingImport.stats.adhkarCountersCount} عداد أذكار.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -544,7 +545,8 @@ export const OfflineBackupView: React.FC = () => {
                     </p>
                     <p className="text-[11px] text-slate-400">
                       {new Date(snap.createdAt).toLocaleString('ar-SA')} • {snap.stats.bookmarksCount} مفضلة • {snap.stats.spacedCardsCount} بطاقة حفظ
-                      {snap.stats.memorizedSurahsCount ? ` • ${snap.stats.memorizedSurahsCount} سورة محفوظة` : ''}
+                      {snap.stats.memorizedSurahsCount ? ` • ${snap.stats.memorizedSurahsCount} سورة` : ''}
+                      {snap.stats.coachSavedAyahsCount ? ` • ${snap.stats.coachSavedAyahsCount} آية تجويد` : ''}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
