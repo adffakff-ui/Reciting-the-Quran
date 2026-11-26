@@ -2,14 +2,20 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   Search, BookOpen, Volume2, Bookmark, Sparkles, ChevronRight, 
   Play, Pause, ChevronLeft, Square, SkipForward, SkipBack, 
-  Repeat, Gauge, Radio, ListOrdered
+  Repeat, Gauge, Radio, ListOrdered, HardDriveDownload, CheckCircle2, Loader2
 } from 'lucide-react';
 import { 
   QURAN_SURAHS, RECITERS, Surah, Ayah, 
   getReciterAyahAudioUrl, getReciterBasmalahAudioUrl, getAyahDisplayText 
 } from '../data/quranData';
 import { AyahModal } from './AyahModal';
-import { prefetchAudioToCache, resolvePlayableAudioSrc } from '../utils/offlineStorage';
+import {
+  downloadAudioPackOffline,
+  getSurahAyahAudioUrls,
+  isSurahCachedOffline,
+  prefetchAudioToCache,
+  resolvePlayableAudioSrc,
+} from '../utils/offlineStorage';
 
 interface MushafViewProps {
   bookmarks: string[];
@@ -78,6 +84,16 @@ export const MushafView: React.FC<MushafViewProps> = ({
   const [ayahPage, setAyahPage] = useState(1);
   const pageSize = 30;
   const [jumpAyahNum, setJumpAyahNum] = useState('');
+  const [surahOfflineStatus, setSurahOfflineStatus] = useState<{
+    cachedCount: number;
+    totalCount: number;
+    isComplete: boolean;
+  } | null>(null);
+  const [isDownloadingSurahOffline, setIsDownloadingSurahOffline] = useState(false);
+  const [surahDownloadProgress, setSurahDownloadProgress] = useState<{ completed: number; total: number }>({
+    completed: 0,
+    total: 0,
+  });
 
   // Refs to prevent stale closures during sequential callbacks
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -120,6 +136,20 @@ export const MushafView: React.FC<MushafViewProps> = ({
       localStorage.setItem('mushaf_auto_next_surah', String(autoNextSurah));
     } catch {}
   }, [autoNextSurah]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedSurah) {
+      setSurahOfflineStatus(null);
+      return;
+    }
+    isSurahCachedOffline(selectedSurah, selectedReciter).then((res) => {
+      if (active) setSurahOfflineStatus(res);
+    });
+    return () => {
+      active = false;
+    };
+  }, [selectedSurah, selectedReciter]);
 
   useEffect(() => {
     try {
@@ -637,6 +667,38 @@ export const MushafView: React.FC<MushafViewProps> = ({
     }
   };
 
+  const handleDownloadCurrentSurahOffline = async () => {
+    if (!selectedSurah || isDownloadingSurahOffline) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const reciter = RECITERS.find(r => r.identifier === selectedReciter) || RECITERS[0];
+    const urls = getSurahAyahAudioUrls(selectedSurah, reciter.identifier);
+    setIsDownloadingSurahOffline(true);
+    setSurahDownloadProgress({ completed: 0, total: urls.length });
+    try {
+      await downloadAudioPackOffline(
+        {
+          id: `surah_${selectedSurah.number}_${reciter.id}`,
+          type: 'surah',
+          title: `سورة ${selectedSurah.name}`,
+          subtitle: `${selectedSurah.numberOfAyahs} آية • ${selectedSurah.revelationType === 'Meccan' ? 'مكية' : 'مدنية'}`,
+          reciterName: reciter.name,
+          urls,
+          ayahCount: urls.length,
+        },
+        (completed, total) => {
+          setSurahDownloadProgress({ completed, total });
+        }
+      );
+      const updated = await isSurahCachedOffline(selectedSurah, reciter.identifier);
+      setSurahOfflineStatus(updated);
+    } catch {
+      const updated = await isSurahCachedOffline(selectedSurah, reciter.identifier);
+      setSurahOfflineStatus(updated);
+    } finally {
+      setIsDownloadingSurahOffline(false);
+    }
+  };
+
   const totalPages = selectedSurah ? Math.ceil(selectedSurah.ayahs.length / pageSize) : 1;
   const displayedAyahs = selectedSurah
     ? (selectedSurah.ayahs.length > 50
@@ -798,6 +860,32 @@ export const MushafView: React.FC<MushafViewProps> = ({
                   <Gauge className="w-3.5 h-3.5 text-emerald-400" />
                   <span>{playbackSpeed}x</span>
                 </button>
+
+                {surahOfflineStatus?.isComplete ? (
+                  <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] sm:text-xs font-bold min-h-[36px]">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>متاح أوفلاين</span>
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleDownloadCurrentSurahOffline}
+                    disabled={isDownloadingSurahOffline}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600/25 hover:bg-teal-600/40 border border-teal-400/50 text-teal-200 text-[11px] sm:text-xs font-bold min-h-[36px] cursor-pointer disabled:opacity-60"
+                    title="حفظ السورة بصوت هذا الشيخ للاستماع بدون إنترنت"
+                  >
+                    {isDownloadingSurahOffline ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>{surahDownloadProgress.completed}/{surahDownloadProgress.total}</span>
+                      </>
+                    ) : (
+                      <>
+                        <HardDriveDownload className="w-3.5 h-3.5" />
+                        <span>حفظ أوفلاين</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>

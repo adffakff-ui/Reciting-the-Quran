@@ -24,6 +24,12 @@ import {
   Check,
   Layers,
   FileCheck,
+  UserCheck,
+  Pause,
+  Play,
+  CheckSquare,
+  Square,
+  Sparkles,
 } from 'lucide-react';
 import { QURAN_SURAHS, RECITERS } from '../data/quranData';
 import { ADHKAR_SHEIKHS } from '../data/adhkarData';
@@ -33,6 +39,8 @@ import {
   BackupPayload,
   LocalSnapshot,
   OfflineAudioPack,
+  ReciterOfflineCoverage,
+  TOTAL_QURAN_AYAHS,
   createBackupPayload,
   deleteLocalSnapshot,
   downloadAudioPackOffline,
@@ -40,13 +48,17 @@ import {
   getAdhkarSheikhAudioUrls,
   getAllSheikhsAdhkarUrls,
   getBatchSurahsAudioUrls,
+  getFullMushafAudioUrls,
+  getJuzAudioUrls,
   getPopularOfflineSurahs,
+  getRecitersOfflineCoverage,
   getStorageSummary,
   getSurahAyahAudioUrls,
   listLocalSnapshots,
   listOfflineAudioPacks,
   parseAndValidateBackup,
   removeOfflineAudioPack,
+  removeReciterOfflineAudio,
   restoreBackupPayload,
   saveLocalSnapshot,
 } from '../utils/offlineStorage';
@@ -61,16 +73,24 @@ export const OfflineBackupView: React.FC = () => {
   );
   const [snapshots, setSnapshots] = useState<LocalSnapshot[]>([]);
   const [audioPacks, setAudioPacks] = useState<OfflineAudioPack[]>([]);
+  const [reciterCoverages, setReciterCoverages] = useState<ReciterOfflineCoverage[]>([]);
   const [storageSummary, setStorageSummary] = useState({
     usedMB: 0,
     quotaMB: 0,
     cachedAudioFiles: 0,
     swReady: false,
+    persisted: false,
   });
 
   const [selectedSurahNum, setSelectedSurahNum] = useState<number>(18); // Default Al-Kahf
+  const [selectedJuzNum, setSelectedJuzNum] = useState<number>(30);
   const [selectedReciterId, setSelectedReciterId] = useState<string>(RECITERS[0].identifier);
   const [selectedAdhkarSheikhId, setSelectedAdhkarSheikhId] = useState<string>(ADHKAR_SHEIKHS[0].id);
+  const [selectedMultiReciters, setSelectedMultiReciters] = useState<string[]>([
+    RECITERS[0].identifier,
+    RECITERS[3].identifier, // المنشاوي
+    RECITERS[4].identifier, // الحصري
+  ]);
 
   const [pendingImport, setPendingImport] = useState<BackupPayload | null>(null);
   const [statusMessage, setStatusMessage] = useState<{
@@ -83,17 +103,24 @@ export const OfflineBackupView: React.FC = () => {
     completed: 0,
     total: 0,
   });
+  const [multiQueueStatus, setMultiQueueStatus] = useState<{
+    currentIdx: number;
+    totalReciters: number;
+    currentReciterName: string;
+  } | null>(null);
 
   const refreshAllState = async () => {
     setCurrentBackupInfo(createBackupPayload());
-    const [snaps, packs, summary] = await Promise.all([
+    const [snaps, packs, summary, coverages] = await Promise.all([
       listLocalSnapshots(),
       listOfflineAudioPacks(),
       getStorageSummary(),
+      getRecitersOfflineCoverage(),
     ]);
     setSnapshots(snaps);
     setAudioPacks(packs);
     setStorageSummary(summary);
+    setReciterCoverages(coverages);
   };
 
   useEffect(() => {
@@ -176,7 +203,7 @@ export const OfflineBackupView: React.FC = () => {
 
   const startAudioPackDownload = async (
     id: string,
-    type: 'surah' | 'adhkar',
+    type: 'surah' | 'adhkar' | 'mushaf' | 'juz',
     title: string,
     subtitle: string,
     reciterName: string,
@@ -212,10 +239,12 @@ export const OfflineBackupView: React.FC = () => {
       await refreshAllState();
       showStatus('success', `تم حفظ "${title}" للاستماع بدون إنترنت (${urls.length} مقطع صوتي).`);
     } catch (err: unknown) {
+      await refreshAllState();
       const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء التنزيل';
-      showStatus('error', msg);
+      showStatus(msg.includes('مؤقتاً') ? 'info' : 'error', msg);
     } finally {
       setDownloadingTitle(null);
+      setMultiQueueStatus(null);
       downloadAbortRef.current = null;
     }
   };
@@ -309,7 +338,104 @@ export const OfflineBackupView: React.FC = () => {
     showStatus('info', `تم حذف "${pack.title}" من الذاكرة المحلية.`);
   };
 
+  const handleDownloadFullMushafForReciter = (reciterIdentifier: string) => {
+    const reciter = RECITERS.find((r) => r.identifier === reciterIdentifier) || RECITERS[0];
+    const urls = getFullMushafAudioUrls(reciter.identifier);
+    startAudioPackDownload(
+      `full_mushaf_${reciter.id}`,
+      'mushaf',
+      `المصحف الشريف كاملاً — ${reciter.name}`,
+      `114 سورة • ${TOTAL_QURAN_AYAHS} آية كاملة بدون إنترنت`,
+      reciter.name,
+      urls
+    );
+  };
+
+  const handleDownloadSelectedJuz = () => {
+    const reciter = RECITERS.find((r) => r.identifier === selectedReciterId) || RECITERS[0];
+    const urls = getJuzAudioUrls(selectedJuzNum, reciter.identifier);
+    startAudioPackDownload(
+      `juz_${selectedJuzNum}_${reciter.id}`,
+      'juz',
+      `الجزء ${selectedJuzNum} كاملاً`,
+      `تلاوة متصلة بدون إنترنت (${urls.length} مقطع)`,
+      reciter.name,
+      urls
+    );
+  };
+
+  const handleDownloadMultiRecitersMushaf = async (reciterIdentifiers: string[]) => {
+    if (!isOnline) {
+      showStatus('error', 'يلزم الاتصال بالإنترنت لتنزيل ملفات الصوت لأول مرة ثم تصبح متاحة بدون إنترنت.');
+      return;
+    }
+    if (downloadingTitle || reciterIdentifiers.length === 0) return;
+
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+
+    try {
+      for (let i = 0; i < reciterIdentifiers.length; i++) {
+        if (controller.signal.aborted) break;
+        const reciter = RECITERS.find((r) => r.identifier === reciterIdentifiers[i]);
+        if (!reciter) continue;
+
+        const urls = getFullMushafAudioUrls(reciter.identifier);
+        const title = `المصحف كاملاً (${i + 1}/${reciterIdentifiers.length}) — ${reciter.name}`;
+        setMultiQueueStatus({
+          currentIdx: i + 1,
+          totalReciters: reciterIdentifiers.length,
+          currentReciterName: reciter.name,
+        });
+        setDownloadingTitle(title);
+        setDownloadProgress({ completed: 0, total: urls.length });
+
+        await downloadAudioPackOffline(
+          {
+            id: `full_mushaf_${reciter.id}`,
+            type: 'mushaf',
+            title: `المصحف الشريف كاملاً — ${reciter.name}`,
+            subtitle: `114 سورة • ${TOTAL_QURAN_AYAHS} آية كاملة بدون إنترنت`,
+            reciterName: reciter.name,
+            urls,
+            ayahCount: urls.length,
+          },
+          (completed, total) => {
+            setDownloadProgress({ completed, total });
+          },
+          controller.signal
+        );
+        await refreshAllState();
+      }
+      showStatus(
+        'success',
+        `تم حفظ النسخة الكاملة للمصحف الشريف لـ ${reciterIdentifiers.length} من الشيوخ للعمل بدون إنترنت.`
+      );
+    } catch (err: unknown) {
+      await refreshAllState();
+      const msg = err instanceof Error ? err.message : 'تم إيقاف التنزيل مؤقتاً';
+      showStatus(msg.includes('مؤقتاً') ? 'info' : 'error', msg);
+    } finally {
+      setDownloadingTitle(null);
+      setMultiQueueStatus(null);
+      downloadAbortRef.current = null;
+    }
+  };
+
+  const handleDeleteReciterAudio = async (reciterIdentifier: string, reciterName: string) => {
+    await removeReciterOfflineAudio(reciterIdentifier);
+    await refreshAllState();
+    showStatus('info', `تم مسح تلاوات ${reciterName} من الذاكرة المحلية.`);
+  };
+
+  const toggleMultiReciter = (identifier: string) => {
+    setSelectedMultiReciters((prev) =>
+      prev.includes(identifier) ? prev.filter((id) => id !== identifier) : [...prev, identifier]
+    );
+  };
+
   const popularSurahs = getPopularOfflineSurahs();
+  const completedRecitersCount = reciterCoverages.filter((r) => r.isComplete).length;
 
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-5 sm:space-y-7 animate-fadeIn w-full max-w-full overflow-x-hidden">
@@ -572,34 +698,56 @@ export const OfflineBackupView: React.FC = () => {
         )}
       </div>
 
-      {/* Section 2: Offline Audio Packs Downloader */}
-      <div className="p-4 sm:p-7 rounded-2xl sm:rounded-3xl bg-slate-900 border border-slate-800 space-y-5">
-        <div className="border-b border-slate-800 pb-4">
-          <h3 className="text-lg sm:text-xl font-bold text-white font-quran flex items-center gap-2">
-            <Volume2 className="w-5 h-5 text-amber-400" />
-            <span>تنزيل التلاوات والأذكار للاستماع بدون إنترنت</span>
-          </h3>
-          <p className="text-xs text-slate-400 mt-1">
-            اختر السورة أو حزمة الأذكار لتنزيل ملفاتها الصوتية في ذاكرة الجهاز وتشغيلها لاحقاً بالتتابع التلقائي بدون إنترنت.
-          </p>
+      {/* Section 2: Complete Offline Mushaf & All 14 Sheikhs Audio Library */}
+      <div className="p-4 sm:p-7 rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30 border border-emerald-500/30 space-y-5 shadow-2xl">
+        <div className="border-b border-slate-800 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold mb-2">
+              <Sparkles className="w-3 h-3" />
+              <span>النسخة الكاملة للمصحف الشريف بصوت الشيوخ (114 سورة • {TOTAL_QURAN_AYAHS} آية)</span>
+            </div>
+            <h3 className="text-lg sm:text-xl font-bold text-white font-quran flex items-center gap-2">
+              <Volume2 className="w-5 h-5 text-amber-400 shrink-0" />
+              <span>مكتبة المصحف الكامل للعمل بدون إنترنت</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              نص المصحف الكامل (114 سورة) محفوظ لديك أوفلاين دائماً، ويمكنك هنا تنزيل المصحف الكامل بصوت شيخ واحد أو عدة شيوخ أو جميع الشيوخ الـ {RECITERS.length} مع حفظ التقدم واستكمال التنزيل في أي وقت.
+            </p>
+          </div>
+          <div className="flex flex-col items-start sm:items-end gap-1 shrink-0 text-xs">
+            <span className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-emerald-300 font-bold">
+              مكتملون: {completedRecitersCount} / {RECITERS.length} شيوخ
+            </span>
+            {storageSummary.persisted && (
+              <span className="text-[11px] text-teal-400 font-semibold">
+                الذاكرة الدائمة مفعّلة لحماية الصوتيات
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Active Download Progress Bar */}
         {downloadingTitle && (
           <div className="p-4 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 space-y-2.5">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-emerald-300">
                 <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                 <span>جاري تنزيل: {downloadingTitle}</span>
               </div>
               <button
                 onClick={() => downloadAbortRef.current?.abort()}
-                className="px-2.5 py-1 rounded-lg bg-rose-500/20 border border-rose-500/40 text-rose-300 text-xs font-bold cursor-pointer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs font-bold cursor-pointer"
               >
-                إلغاء
+                <Pause className="w-3.5 h-3.5" />
+                <span>إيقاف مؤقت وحفظ التقدم</span>
               </button>
             </div>
-            <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden">
+            {multiQueueStatus && (
+              <p className="text-[11px] text-teal-300 font-semibold">
+                الطابور المتعدد: الشيخ {multiQueueStatus.currentIdx} من {multiQueueStatus.totalReciters} ({multiQueueStatus.currentReciterName})
+              </p>
+            )}
+            <div className="w-full h-3 bg-slate-950 rounded-full overflow-hidden">
               <div
                 className="h-full bg-gradient-to-l from-emerald-400 to-teal-500 transition-all duration-200"
                 style={{
@@ -611,11 +759,206 @@ export const OfflineBackupView: React.FC = () => {
                 }}
               />
             </div>
-            <p className="text-[11px] text-slate-300">
-              تم حفظ {downloadProgress.completed} من {downloadProgress.total} مقطع صوتي
-            </p>
+            <div className="flex items-center justify-between text-[11px] text-slate-300">
+              <span>
+                تم حفظ {downloadProgress.completed} من {downloadProgress.total} مقطع صوتي
+              </span>
+              <span className="font-bold text-emerald-300">
+                {downloadProgress.total > 0
+                  ? Math.round((downloadProgress.completed / downloadProgress.total) * 100)
+                  : 0}%
+              </span>
+            </div>
           </div>
         )}
+
+        {/* Full Mushaf One-Click & Multi-Sheikh Batch Downloader */}
+        <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-emerald-500/25 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs sm:text-sm font-bold text-emerald-300">
+              <UserCheck className="w-4 h-4 shrink-0" />
+              <span>تنزيل المصحف الكامل (114 سورة) بصوت الشيخ المختار أو مجموعة الشيوخ</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedMultiReciters(RECITERS.map((r) => r.identifier))}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-bold cursor-pointer"
+              >
+                تحديد الكل ({RECITERS.length})
+              </button>
+              <button
+                onClick={() => setSelectedMultiReciters([])}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 text-[11px] font-bold cursor-pointer"
+              >
+                إلغاء التحديد
+              </button>
+            </div>
+          </div>
+
+          {/* Grid of all 14 Sheikhs with per-Sheikh progress & Full Mushaf button */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {RECITERS.map((r) => {
+              const cov = reciterCoverages.find((c) => c.identifier === r.identifier);
+              const cached = cov?.cachedAyahs || 0;
+              const pct = cov?.percentage || 0;
+              const isDone = Boolean(cov?.isComplete);
+              const isChecked = selectedMultiReciters.includes(r.identifier);
+
+              return (
+                <div
+                  key={r.id}
+                  className={`p-3.5 rounded-2xl border transition-all space-y-2.5 ${
+                    isDone
+                      ? 'bg-emerald-950/30 border-emerald-500/40'
+                      : isChecked
+                      ? 'bg-slate-900/90 border-teal-500/40'
+                      : 'bg-slate-900/60 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => toggleMultiReciter(r.identifier)}
+                      className="flex items-start gap-2.5 text-right cursor-pointer min-w-0 flex-1"
+                    >
+                      {isChecked ? (
+                        <CheckSquare className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-xs sm:text-sm font-bold text-white truncate">{r.name}</p>
+                        <p className="text-[11px] text-slate-400 truncate">
+                          {r.style} • ~{cov?.estimatedTotalMB || 420} م.ب للمصحف كاملاً
+                        </p>
+                      </div>
+                    </button>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => handleDownloadFullMushafForReciter(r.identifier)}
+                        disabled={Boolean(downloadingTitle) || isDone}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all cursor-pointer min-h-[34px] ${
+                          isDone
+                            ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-default'
+                            : 'bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white'
+                        }`}
+                      >
+                        {isDone ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>مكتمل</span>
+                          </>
+                        ) : cached > 0 ? (
+                          <>
+                            <Play className="w-3.5 h-3.5" />
+                            <span>استكمال</span>
+                          </>
+                        ) : (
+                          <>
+                            <HardDriveDownload className="w-3.5 h-3.5" />
+                            <span>تنزيل المصحف</span>
+                          </>
+                        )}
+                      </button>
+
+                      {cached > 0 && (
+                        <button
+                          onClick={() => handleDeleteReciterAudio(r.identifier, r.name)}
+                          disabled={Boolean(downloadingTitle)}
+                          className="p-1.5 rounded-xl bg-slate-800 hover:bg-rose-950/60 border border-slate-700 text-slate-400 hover:text-rose-300 disabled:opacity-50 cursor-pointer min-h-[34px] min-w-[34px] flex items-center justify-center"
+                          title={`حذف تلاوات ${r.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Per-Reciter Progress Bar */}
+                  <div className="space-y-1">
+                    <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          isDone ? 'bg-emerald-400' : 'bg-teal-500'
+                        }`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>{cached.toLocaleString('en-US')} / {TOTAL_QURAN_AYAHS.toLocaleString('en-US')} آية محفوظة</span>
+                      <span className={isDone ? 'text-emerald-400 font-bold' : ''}>{pct}%</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+            <button
+              onClick={() => handleDownloadMultiRecitersMushaf(selectedMultiReciters)}
+              disabled={Boolean(downloadingTitle) || selectedMultiReciters.length === 0}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-950/40 cursor-pointer min-h-[46px]"
+            >
+              <HardDriveDownload className="w-4 h-4 shrink-0" />
+              <span>
+                تنزيل المصحف الكامل للشيوخ المحددين ({selectedMultiReciters.length} من {RECITERS.length})
+              </span>
+            </button>
+
+            <button
+              onClick={() => handleDownloadMultiRecitersMushaf(RECITERS.map((r) => r.identifier))}
+              disabled={Boolean(downloadingTitle)}
+              className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 disabled:opacity-50 text-amber-300 text-xs sm:text-sm font-bold cursor-pointer min-h-[46px]"
+            >
+              <Layers className="w-4 h-4 shrink-0" />
+              <span>تنزيل جميع الشيوخ ({RECITERS.length} مصحفاً كاملاً)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Juz 1..30 Downloader */}
+        <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-teal-400">
+            <Layers className="w-4 h-4" />
+            <span>تنزيل أي جزء من الأجزاء الثلاثين (الجزء 1 إلى الجزء 30)</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <select
+              value={selectedJuzNum}
+              onChange={(e) => setSelectedJuzNum(Number(e.target.value))}
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs sm:text-sm font-semibold min-h-[44px]"
+            >
+              {Array.from({ length: 30 }, (_, i) => i + 1).map((j) => (
+                <option key={j} value={j}>
+                  الجزء {j}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedReciterId}
+              onChange={(e) => setSelectedReciterId(e.target.value)}
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs sm:text-sm font-semibold min-h-[44px]"
+            >
+              {RECITERS.map((r) => (
+                <option key={r.identifier} value={r.identifier}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={handleDownloadSelectedJuz}
+              disabled={Boolean(downloadingTitle)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white text-xs sm:text-sm font-bold cursor-pointer min-h-[44px] active:scale-95"
+            >
+              <HardDriveDownload className="w-4 h-4 shrink-0" />
+              <span>تنزيل الجزء {selectedJuzNum} أوفلاين</span>
+            </button>
+          </div>
+        </div>
 
         {/* Custom Surah + Reciter Downloader */}
         <div className="p-4 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-3">

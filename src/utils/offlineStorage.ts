@@ -1,4 +1,4 @@
-import { QURAN_SURAHS, RECITERS, Surah, getReciterAyahAudioUrl } from '../data/quranData';
+import { QURAN_SURAHS, RECITERS, Surah, getReciterAyahAudioUrl, getReciterBasmalahAudioUrl } from '../data/quranData';
 import { ADHKAR_LIST, ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
 
 export const AUDIO_CACHE_NAME = 'quran-audio-cache';
@@ -46,13 +46,27 @@ export interface LocalSnapshot extends BackupPayload {
 
 export interface OfflineAudioPack {
   id: string;
-  type: 'surah' | 'adhkar';
+  type: 'surah' | 'adhkar' | 'mushaf' | 'juz';
   title: string;
   subtitle: string;
   reciterName: string;
   urls: string[];
   ayahCount: number;
+  completedCount?: number;
+  isComplete?: boolean;
   savedAt: string;
+}
+
+export interface ReciterOfflineCoverage {
+  reciterId: string;
+  identifier: string;
+  name: string;
+  style: string;
+  cachedAyahs: number;
+  totalAyahs: number;
+  percentage: number;
+  isComplete: boolean;
+  estimatedTotalMB: number;
 }
 
 function openOfflineDB(): Promise<IDBDatabase> {
@@ -266,8 +280,17 @@ export async function deleteLocalSnapshot(id: string): Promise<void> {
   db.close();
 }
 
+export const TOTAL_QURAN_AYAHS = QURAN_SURAHS.reduce((sum, s) => sum + s.ayahs.length, 0);
+
 export function getSurahAyahAudioUrls(surah: Surah, reciterIdentifier: string): string[] {
-  return surah.ayahs.map((a) => getReciterAyahAudioUrl(reciterIdentifier, surah.number, a.number));
+  const urls: string[] = [];
+  if (surah.number > 1 && surah.number !== 9) {
+    urls.push(getReciterBasmalahAudioUrl(reciterIdentifier));
+  }
+  for (const a of surah.ayahs) {
+    urls.push(getReciterAyahAudioUrl(reciterIdentifier, surah.number, a.number));
+  }
+  return Array.from(new Set(urls));
 }
 
 export function getBatchSurahsAudioUrls(surahNumbers: number[], reciterIdentifier: string): string[] {
@@ -279,6 +302,33 @@ export function getBatchSurahsAudioUrls(surahNumbers: number[], reciterIdentifie
     }
   }
   return Array.from(new Set(urls));
+}
+
+export function getFullMushafAudioUrls(reciterIdentifier: string): string[] {
+  const urls: string[] = [];
+  for (const surah of QURAN_SURAHS) {
+    for (const a of surah.ayahs) {
+      urls.push(getReciterAyahAudioUrl(reciterIdentifier, surah.number, a.number));
+    }
+  }
+  return urls;
+}
+
+export function getJuzAudioUrls(juzNumber: number, reciterIdentifier: string): string[] {
+  const surahsInJuz = QURAN_SURAHS.filter((s) => s.juz === juzNumber);
+  return getBatchSurahsAudioUrls(
+    surahsInJuz.map((s) => s.number),
+    reciterIdentifier
+  );
+}
+
+export async function requestPersistentStorage(): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.persist) {
+      return await navigator.storage.persist();
+    }
+  } catch {}
+  return false;
 }
 
 export function getAdhkarSheikhAudioUrls(sheikh: AdhkarSheikh): string[] {
@@ -365,50 +415,7 @@ export async function listOfflineAudioPacks(): Promise<OfflineAudioPack[]> {
   }
 }
 
-export async function downloadAudioPackOffline(
-  pack: Omit<OfflineAudioPack, 'savedAt'>,
-  onProgress: (completed: number, total: number) => void,
-  signal?: AbortSignal
-): Promise<OfflineAudioPack> {
-  if (typeof caches === 'undefined') {
-    throw new Error('ذاكرة التخزين المؤقت غير مدعومة في هذا المتصفح');
-  }
-
-  const cache = await caches.open(AUDIO_CACHE_NAME);
-  const total = pack.urls.length;
-  let completed = 0;
-
-  const batchSize = 4;
-  for (let i = 0; i < total; i += batchSize) {
-    if (signal?.aborted) {
-      throw new Error('تم إلغاء التنزيل');
-    }
-    const batch = pack.urls.slice(i, i + batchSize);
-    await Promise.all(
-      batch.map(async (url) => {
-        if (signal?.aborted) return;
-        const existing = await cache.match(url);
-        if (!existing) {
-          const isCorsSupported = url.includes('everyayah.com');
-          const res = await fetch(url, {
-            mode: isCorsSupported ? 'cors' : 'no-cors',
-            signal,
-          });
-          if (res && (res.ok || res.type === 'opaque')) {
-            await cache.put(url, res);
-          }
-        }
-        completed += 1;
-        onProgress(completed, total);
-      })
-    );
-  }
-
-  const savedPack: OfflineAudioPack = {
-    ...pack,
-    savedAt: new Date().toISOString(),
-  };
-
+async function saveAudioPackRecord(savedPack: OfflineAudioPack): Promise<void> {
   const db = await openOfflineDB();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(AUDIO_PACKS_STORE, 'readwrite');
@@ -417,6 +424,122 @@ export async function downloadAudioPackOffline(
     tx.onerror = () => reject(tx.error);
   });
   db.close();
+}
+
+async function fetchWithRetry(
+  url: string,
+  isCorsSupported: boolean,
+  signal?: AbortSignal,
+  retries = 2
+): Promise<Response | null> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+    try {
+      const res = await fetch(url, {
+        mode: isCorsSupported ? 'cors' : 'no-cors',
+        signal,
+      });
+      if (res && (res.ok || res.type === 'opaque')) {
+        return res;
+      }
+    } catch (err: unknown) {
+      if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        throw err;
+      }
+      if (attempt < retries) {
+        await new Promise((r) => setTimeout(r, 350 * (attempt + 1)));
+      }
+    }
+  }
+  return null;
+}
+
+export async function downloadAudioPackOffline(
+  pack: Omit<OfflineAudioPack, 'savedAt'>,
+  onProgress: (completed: number, total: number) => void,
+  signal?: AbortSignal,
+  options?: { batchSize?: number; retries?: number; saveCheckpointEvery?: number }
+): Promise<OfflineAudioPack> {
+  if (typeof caches === 'undefined') {
+    throw new Error('ذاكرة التخزين المؤقت غير مدعومة في هذا المتصفح');
+  }
+
+  await requestPersistentStorage();
+
+  const cache = await caches.open(AUDIO_CACHE_NAME);
+  const total = pack.urls.length;
+  let completed = 0;
+  let newDownloads = 0;
+
+  const batchSize = options?.batchSize || (total > 500 ? 8 : 4);
+  const retries = options?.retries ?? 2;
+  const saveCheckpointEvery = options?.saveCheckpointEvery ?? 120;
+
+  let wasAborted = false;
+
+  for (let i = 0; i < total; i += batchSize) {
+    if (signal?.aborted) {
+      wasAborted = true;
+      break;
+    }
+    const batch = pack.urls.slice(i, i + batchSize);
+    await Promise.all(
+      batch.map(async (url) => {
+        if (signal?.aborted) return;
+        const existing = await cache.match(url);
+        const isCorsSupported = url.includes('everyayah.com');
+        if (existing && (!isCorsSupported || (existing.ok && existing.type !== 'opaque'))) {
+          completed += 1;
+          onProgress(completed, total);
+          return;
+        }
+        try {
+          const res = await fetchWithRetry(url, isCorsSupported, signal, retries);
+          if (res) {
+            await cache.put(url, res);
+            completed += 1;
+            newDownloads += 1;
+          }
+        } catch (err: unknown) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            wasAborted = true;
+          }
+        }
+        onProgress(completed, total);
+      })
+    );
+
+    if (wasAborted || signal?.aborted) {
+      wasAborted = true;
+      break;
+    }
+
+    if (newDownloads > 0 && newDownloads % saveCheckpointEvery < batchSize) {
+      await saveAudioPackRecord({
+        ...pack,
+        completedCount: completed,
+        isComplete: completed >= total,
+        savedAt: new Date().toISOString(),
+      }).catch(() => {});
+    }
+  }
+
+  const savedPack: OfflineAudioPack = {
+    ...pack,
+    completedCount: completed,
+    isComplete: !wasAborted && completed >= total,
+    savedAt: new Date().toISOString(),
+  };
+
+  if (completed > 0) {
+    await saveAudioPackRecord(savedPack);
+  }
+
+  if (wasAborted) {
+    throw new Error(`تم إيقاف التنزيل مؤقتاً وحفظ التقدم (${completed} / ${total} مقطع محفوظ بدون إنترنت).`);
+  }
 
   return savedPack;
 }
@@ -424,7 +547,10 @@ export async function downloadAudioPackOffline(
 export async function removeOfflineAudioPack(pack: OfflineAudioPack): Promise<void> {
   if (typeof caches !== 'undefined') {
     const cache = await caches.open(AUDIO_CACHE_NAME);
-    await Promise.all(pack.urls.map((url) => cache.delete(url)));
+    const chunkSize = 200;
+    for (let i = 0; i < pack.urls.length; i += chunkSize) {
+      await Promise.all(pack.urls.slice(i, i + chunkSize).map((url) => cache.delete(url)));
+    }
   }
   const db = await openOfflineDB();
   await new Promise<void>((resolve, reject) => {
@@ -436,22 +562,135 @@ export async function removeOfflineAudioPack(pack: OfflineAudioPack): Promise<vo
   db.close();
 }
 
+export async function removeReciterOfflineAudio(reciterIdentifier: string): Promise<void> {
+  if (typeof caches !== 'undefined') {
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    const keys = await cache.keys();
+    const marker = `/data/${reciterIdentifier}/`;
+    const matching = keys.filter((req) => req.url.includes(marker));
+    const chunkSize = 200;
+    for (let i = 0; i < matching.length; i += chunkSize) {
+      await Promise.all(matching.slice(i, i + chunkSize).map((req) => cache.delete(req)));
+    }
+  }
+
+  const reciter = RECITERS.find((r) => r.identifier === reciterIdentifier);
+  if (reciter) {
+    const packs = await listOfflineAudioPacks();
+    const db = await openOfflineDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(AUDIO_PACKS_STORE, 'readwrite');
+      const store = tx.objectStore(AUDIO_PACKS_STORE);
+      for (const p of packs) {
+        if (p.id.endsWith(`_${reciter.id}`) || p.id === `full_mushaf_${reciter.id}`) {
+          store.delete(p.id);
+        }
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }
+}
+
+export async function getRecitersOfflineCoverage(): Promise<ReciterOfflineCoverage[]> {
+  const countsByIdentifier = new Map<string, Set<string>>();
+  for (const r of RECITERS) {
+    countsByIdentifier.set(r.identifier, new Set<string>());
+  }
+
+  try {
+    if (typeof caches !== 'undefined') {
+      const cache = await caches.open(AUDIO_CACHE_NAME);
+      const keys = await cache.keys();
+      const pattern = /\/data\/([^/]+)\/(\d{6}\.mp3)/;
+      for (const req of keys) {
+        const match = req.url.match(pattern);
+        if (match) {
+          const identifier = match[1];
+          const file = match[2];
+          const set = countsByIdentifier.get(identifier);
+          if (set) {
+            set.add(file);
+          }
+        }
+      }
+    }
+  } catch {}
+
+  return RECITERS.map((r) => {
+    const cachedAyahs = Math.min(countsByIdentifier.get(r.identifier)?.size || 0, TOTAL_QURAN_AYAHS);
+    const percentage = Math.round((cachedAyahs / TOTAL_QURAN_AYAHS) * 100);
+    // Estimate full Mushaf size based on reciter bitrate/style (~280MB for 40kbps, ~420MB for 128kbps, ~560MB for 192kbps)
+    const estimatedTotalMB = r.identifier.includes('40kbps')
+      ? 280
+      : r.identifier.includes('192kbps')
+      ? 560
+      : 420;
+    return {
+      reciterId: r.id,
+      identifier: r.identifier,
+      name: r.name,
+      style: r.style,
+      cachedAyahs,
+      totalAyahs: TOTAL_QURAN_AYAHS,
+      percentage,
+      isComplete: cachedAyahs >= TOTAL_QURAN_AYAHS,
+      estimatedTotalMB,
+    };
+  });
+}
+
+export async function isSurahCachedOffline(
+  surah: Surah,
+  reciterIdentifier: string
+): Promise<{ cachedCount: number; totalCount: number; isComplete: boolean }> {
+  const urls = getSurahAyahAudioUrls(surah, reciterIdentifier);
+  if (typeof caches === 'undefined') {
+    return { cachedCount: 0, totalCount: urls.length, isComplete: false };
+  }
+  try {
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    const results = await Promise.all(
+      urls.map(async (url) => {
+        const hit = await cache.match(url);
+        return Boolean(hit && hit.ok && hit.type !== 'opaque');
+      })
+    );
+    const cachedCount = results.filter(Boolean).length;
+    return {
+      cachedCount,
+      totalCount: urls.length,
+      isComplete: cachedCount >= urls.length,
+    };
+  } catch {
+    return { cachedCount: 0, totalCount: urls.length, isComplete: false };
+  }
+}
+
 export async function getStorageSummary(): Promise<{
   usedMB: number;
   quotaMB: number;
   cachedAudioFiles: number;
   swReady: boolean;
+  persisted: boolean;
 }> {
   let usedMB = 0;
   let quotaMB = 0;
   let cachedAudioFiles = 0;
   let swReady = false;
+  let persisted = false;
 
   try {
-    if (navigator.storage && navigator.storage.estimate) {
-      const est = await navigator.storage.estimate();
-      usedMB = Math.round(((est.usage || 0) / (1024 * 1024)) * 10) / 10;
-      quotaMB = Math.round(((est.quota || 0) / (1024 * 1024)) * 10) / 10;
+    if (navigator.storage) {
+      if (navigator.storage.estimate) {
+        const est = await navigator.storage.estimate();
+        usedMB = Math.round(((est.usage || 0) / (1024 * 1024)) * 10) / 10;
+        quotaMB = Math.round(((est.quota || 0) / (1024 * 1024)) * 10) / 10;
+      }
+      if (navigator.storage.persisted) {
+        persisted = await navigator.storage.persisted();
+      }
     }
   } catch {}
 
@@ -470,7 +709,7 @@ export async function getStorageSummary(): Promise<{
     }
   } catch {}
 
-  return { usedMB, quotaMB, cachedAudioFiles, swReady };
+  return { usedMB, quotaMB, cachedAudioFiles, swReady, persisted };
 }
 
 export function getPopularOfflineSurahs(): Surah[] {
