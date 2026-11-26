@@ -19,12 +19,21 @@ import {
   SkipBack,
   Gauge,
   ListOrdered,
+  HardDriveDownload,
+  Download,
+  Loader2,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { HISN_CATEGORIES, HisnDhikr } from '../data/hisnAlMuslimData';
 import { ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
 import { getReciterAyahAudioUrl } from '../data/quranData';
-import { resolvePlayableAudioSrc } from '../utils/offlineStorage';
+import {
+  downloadAudioPackOffline,
+  exportStandaloneOfflineBookHtml,
+  getHisnSheikhAudioUrls,
+  resolvePlayableAudioSrc,
+  saveKnowledgeBookOfflineSnapshot,
+} from '../utils/offlineStorage';
 import {
   RECITER_PREFERENCES_EVENT,
   formatSheikhOptionLabel,
@@ -65,6 +74,9 @@ export const HisnAlMuslimView: React.FC = () => {
   const [skipCompletedInSequence, setSkipCompletedInSequence] = useState(false);
   const [currentRepetition, setCurrentRepetition] = useState(1);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [offlineStatusNotice, setOfflineStatusNotice] = useState<string | null>(null);
+  const [isCachingOfflineAudio, setIsCachingOfflineAudio] = useState(false);
   const [favoriteReciterIds, setFavoriteReciterIds] = useState<string[]>(() => getReciterPreferences().favoriteReciterIds);
   const [selectedSheikh, setSelectedSheikh] = useState<AdhkarSheikh>(() =>
     getSheikhById(getReciterPreferences().defaultHisnSheikhId)
@@ -369,6 +381,7 @@ export const HisnAlMuslimView: React.FC = () => {
       if (isCancelledRef.current) return;
       speakArabicWithSheikh(`${item.title}. ${item.text}`, activeSheikh, {
         speedMultiplier: playbackSpeedRef.current,
+        onFallbackNotice: (msg) => setAudioNotice(msg),
         onEnd: handleFinishedRepetition,
         onError: () => {
           if (!isCancelledRef.current) stopSequentialPlayback();
@@ -525,6 +538,84 @@ export const HisnAlMuslimView: React.FC = () => {
               <span className="text-[11px] text-slate-400">في المفضلة</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Audio / Offline Status Notices */}
+      {audioNotice && (
+        <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2">
+          <span>{audioNotice}</span>
+          <button onClick={() => setAudioNotice(null)} className="text-amber-300 font-bold px-2 cursor-pointer">✕</button>
+        </div>
+      )}
+      {offlineStatusNotice && (
+        <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-2">
+          <span>{offlineStatusNotice}</span>
+          <button onClick={() => setOfflineStatusNotice(null)} className="text-emerald-300 font-bold px-2 cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {/* Offline Version Strip */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-emerald-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+            <CheckCircle2 className="w-4 h-4" />
+          </div>
+          <div>
+            <p className="text-xs sm:text-sm font-bold text-white">نسخة حصن المسلم للعمل بدون إنترنت</p>
+            <p className="text-[11px] text-slate-400">
+              جميع الأبواب والأدعية والعداد التفاعلي محفوظة للعمل بدون إنترنت، ويمكنك حفظ الصوتيات والكتاب كاملاً محلياً.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            disabled={isCachingOfflineAudio}
+            onClick={async () => {
+              setIsCachingOfflineAudio(true);
+              try {
+                await saveKnowledgeBookOfflineSnapshot('hisn');
+                if (typeof navigator === 'undefined' || navigator.onLine) {
+                  const urls = getHisnSheikhAudioUrls(selectedSheikh);
+                  await downloadAudioPackOffline(
+                    {
+                      id: `hisn_audio_${selectedSheikh.id}`,
+                      type: 'hisn',
+                      title: `صوتيات حصن المسلم — ${selectedSheikh.name}`,
+                      subtitle: 'آية الكرسي والمعوذات بصوت الشيخ للعمل بدون إنترنت',
+                      reciterName: selectedSheikh.name,
+                      urls,
+                      ayahCount: urls.length,
+                    },
+                    () => {}
+                  );
+                }
+                setOfflineStatusNotice(`تم حفظ نسخة حصن المسلم وتلاوات ${selectedSheikh.name} للعمل 100% بدون إنترنت.`);
+              } catch {
+                setOfflineStatusNotice('تم حفظ نصوص حصن المسلم للعمل بدون إنترنت.');
+              } finally {
+                setIsCachingOfflineAudio(false);
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold cursor-pointer min-h-[38px] disabled:opacity-60"
+          >
+            {isCachingOfflineAudio ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <HardDriveDownload className="w-3.5 h-3.5" />
+            )}
+            <span>{isCachingOfflineAudio ? 'جاري الحفظ...' : 'حفظ أوفلاين + الصوتيات'}</span>
+          </button>
+          <button
+            onClick={() => {
+              const fname = exportStandaloneOfflineBookHtml('hisn');
+              setOfflineStatusNotice(`تم تنزيل كتاب حصن المسلم الأوفلاين المستقل (${fname}) مع مشغل استماع مدمج.`);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold cursor-pointer min-h-[38px]"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>تحميل نسخة مستقلة (HTML)</span>
+          </button>
         </div>
       </div>
 

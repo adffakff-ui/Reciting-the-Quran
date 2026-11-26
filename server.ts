@@ -319,7 +319,13 @@ app.get('/api/apk/info', (_req, res) => {
       juzCount: 30,
       recitersCount: 14,
       adhkarCount: 12,
-      offlineCapability: "تشغيل أوفلاين كامل بدون إنترنت"
+      shatibiyyahChaptersCount: 6,
+      shatibiyyahAbyatCount: 25,
+      jazariyyahChaptersCount: 4,
+      jazariyyahAbyatCount: 21,
+      hisnCategoriesCount: 6,
+      hisnItemsCount: 28,
+      offlineCapability: "تشغيل أوفلاين كامل بدون إنترنت (المصحف والأذكار وحصن المسلم والشاطبية والجزرية)"
     }
   });
 });

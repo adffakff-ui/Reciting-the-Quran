@@ -30,6 +30,9 @@ import {
   CheckSquare,
   Square,
   Sparkles,
+  ScrollText,
+  BookMarked,
+  Shield,
 } from 'lucide-react';
 import { QURAN_SURAHS, RECITERS } from '../data/quranData';
 import { ADHKAR_SHEIKHS } from '../data/adhkarData';
@@ -38,19 +41,24 @@ import { PWAInstallButton } from './PWAInstallButton';
 import {
   APP_VERSION,
   BackupPayload,
+  KnowledgeBookOfflineStatus,
   LocalSnapshot,
   OfflineAudioPack,
+  OfflineBookKey,
   ReciterOfflineCoverage,
   TOTAL_QURAN_AYAHS,
   createBackupPayload,
   deleteLocalSnapshot,
   downloadAudioPackOffline,
   downloadBackupJsonFile,
+  exportStandaloneOfflineBookHtml,
   getAdhkarSheikhAudioUrls,
   getAllSheikhsAdhkarUrls,
   getBatchSurahsAudioUrls,
   getFullMushafAudioUrls,
+  getHisnSheikhAudioUrls,
   getJuzAudioUrls,
+  getKnowledgeBooksOfflineStatus,
   getPopularOfflineSurahs,
   getRecitersOfflineCoverage,
   getStorageSummary,
@@ -61,6 +69,7 @@ import {
   removeOfflineAudioPack,
   removeReciterOfflineAudio,
   restoreBackupPayload,
+  saveKnowledgeBookOfflineSnapshot,
   saveLocalSnapshot,
 } from '../utils/offlineStorage';
 
@@ -87,6 +96,9 @@ export const OfflineBackupView: React.FC = () => {
   const [selectedJuzNum, setSelectedJuzNum] = useState<number>(30);
   const [selectedReciterId, setSelectedReciterId] = useState<string>(RECITERS[0].identifier);
   const [selectedAdhkarSheikhId, setSelectedAdhkarSheikhId] = useState<string>(ADHKAR_SHEIKHS[0].id);
+  const [selectedHisnSheikhId, setSelectedHisnSheikhId] = useState<string>(ADHKAR_SHEIKHS[0].id);
+  const [booksStatus, setBooksStatus] = useState<Record<OfflineBookKey, KnowledgeBookOfflineStatus> | null>(null);
+  const [savingBooks, setSavingBooks] = useState(false);
   const [selectedMultiReciters, setSelectedMultiReciters] = useState<string[]>([
     RECITERS[0].identifier,
     RECITERS[3].identifier, // المنشاوي
@@ -112,16 +124,18 @@ export const OfflineBackupView: React.FC = () => {
 
   const refreshAllState = async () => {
     setCurrentBackupInfo(createBackupPayload());
-    const [snaps, packs, summary, coverages] = await Promise.all([
+    const [snaps, packs, summary, coverages, kbStatus] = await Promise.all([
       listLocalSnapshots(),
       listOfflineAudioPacks(),
       getStorageSummary(),
       getRecitersOfflineCoverage(),
+      getKnowledgeBooksOfflineStatus(),
     ]);
     setSnapshots(snaps);
     setAudioPacks(packs);
     setStorageSummary(summary);
     setReciterCoverages(coverages);
+    setBooksStatus(kbStatus);
   };
 
   useEffect(() => {
@@ -204,7 +218,7 @@ export const OfflineBackupView: React.FC = () => {
 
   const startAudioPackDownload = async (
     id: string,
-    type: 'surah' | 'adhkar' | 'mushaf' | 'juz',
+    type: OfflineAudioPack['type'],
     title: string,
     subtitle: string,
     reciterName: string,
@@ -435,6 +449,49 @@ export const OfflineBackupView: React.FC = () => {
     );
   };
 
+  const handleSaveKnowledgeBookOffline = async (target: OfflineBookKey | 'all') => {
+    setSavingBooks(true);
+    try {
+      const updated = await saveKnowledgeBookOfflineSnapshot(target);
+      setBooksStatus(updated);
+      await refreshAllState();
+      const labelMap: Record<OfflineBookKey | 'all', string> = {
+        shatibiyyah: 'متن الشاطبية',
+        jazariyyah: 'متن المقدمة الجزرية',
+        hisn: 'حصن المسلم',
+        all: 'الشاطبية والجزرية وحصن المسلم',
+      };
+      showStatus('success', `تم تثبيت نسخة ${labelMap[target]} في الذاكرة المحلية للعمل 100% بدون إنترنت.`);
+    } catch {
+      showStatus('error', 'تعذر حفظ النسخة المحلية للكتاب في المتصفح.');
+    } finally {
+      setSavingBooks(false);
+    }
+  };
+
+  const handleDownloadHisnOfflineAudio = async () => {
+    const sheikh = ADHKAR_SHEIKHS.find((s) => s.id === selectedHisnSheikhId) || ADHKAR_SHEIKHS[0];
+    await saveKnowledgeBookOfflineSnapshot('hisn');
+    const urls = getHisnSheikhAudioUrls(sheikh);
+    await startAudioPackDownload(
+      `hisn_audio_${sheikh.id}`,
+      'hisn',
+      `حصن المسلم + التلاوات القرآنية (${sheikh.name})`,
+      `نصوص حصن المسلم كاملة + ${urls.length} مقطع قرآني (آية الكرسي والمعوذات)`,
+      sheikh.name,
+      urls
+    );
+  };
+
+  const handleExportStandaloneBook = (target: OfflineBookKey | 'all') => {
+    try {
+      const filename = exportStandaloneOfflineBookHtml(target);
+      showStatus('success', `تم تحميل النسخة المستقلة (${filename}) وتعمل بالاستماع المتتتابع بدون إنترنت.`);
+    } catch {
+      showStatus('error', 'تعذر إنشاء النسخة المستقلة للتحميل.');
+    }
+  };
+
   const popularSurahs = getPopularOfflineSurahs();
   const completedRecitersCount = reciterCoverages.filter((r) => r.isComplete).length;
 
@@ -452,7 +509,7 @@ export const OfflineBackupView: React.FC = () => {
               نسختك القرآنية وبيانات الحفظ محمية بالكامل
             </h2>
             <p className="text-slate-300 text-xs sm:text-sm max-w-2xl leading-relaxed">
-              تصفح المصحف الشريف كاملاً (114 سورة) والأذكار وراجع حفظك في أي وقت بدون إنترنت، مع إمكانية تنزيل التلاوات وتصدير واستعادة نسخة احتياطية كاملة لبياناتك.
+              تصفح المصحف الشريف كاملاً (114 سورة) والأذكار وحصن المسلم ومتني الشاطبية والجزرية في أي وقت بدون إنترنت، مع إمكانية تنزيل التلاوات والكتب المستقلة وتصدير واستعادة نسخة احتياطية كاملة.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1123,6 +1180,175 @@ export const OfflineBackupView: React.FC = () => {
               ))}
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Section 3: Shatibiyyah, Jazariyyah & Hisn Al-Muslim Offline Editions */}
+      <div className="p-4 sm:p-7 rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-teal-950/30 border border-teal-500/30 space-y-5 shadow-2xl">
+        <div className="border-b border-slate-800 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[11px] font-bold mb-2">
+              <Sparkles className="w-3 h-3" />
+              <span>نسخ مستقلة ومحلية تعمل بدون إنترنت مع الاستماع الصوتي المتتتابع</span>
+            </div>
+            <h3 className="text-lg sm:text-xl font-bold text-white font-quran flex items-center gap-2">
+              <ScrollText className="w-5 h-5 text-emerald-400 shrink-0" />
+              <span>الشاطبية والجزرية وحصن المسلم — نسخة بدون إنترنت</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              تعمل النصوص الكاملة والبحث والتكرار والاستماع المتتتابع أوفلاين داخل التطبيق، ويمكنك تثبيتها في ذاكرة الجهاز أو تحميل ملف HTML مستقل يعمل على أي هاتف أو حاسوب بلا اتصال.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              onClick={() => handleSaveKnowledgeBookOffline('all')}
+              disabled={savingBooks}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg cursor-pointer min-h-[42px]"
+            >
+              {savingBooks ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDriveDownload className="w-4 h-4" />}
+              <span>تثبيت الثلاثة أوفلاين دفعة واحدة</span>
+            </button>
+            <button
+              onClick={() => handleExportStandaloneBook('all')}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/40 text-teal-200 text-xs font-bold cursor-pointer min-h-[42px]"
+            >
+              <Download className="w-4 h-4" />
+              <span>تحميل الحزمة الكاملة (HTML)</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Shatibiyyah Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-emerald-500/25 flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-emerald-300 font-bold text-sm">
+                  <ScrollText className="w-4 h-4 shrink-0" />
+                  <span>متن الشاطبية</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold">
+                  جاهز أوفلاين
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {booksStatus?.shatibiyyah.chaptersCount || 6} أبواب • {booksStatus?.shatibiyyah.itemsCount || 25} بيتاً مع شرح الرموز والقراء السبعة والاستماع الصوتي.
+              </p>
+              {booksStatus?.shatibiyyah.savedAt && (
+                <p className="text-[11px] text-emerald-400 font-semibold">
+                  آخر تثبيت محلي: {new Date(booksStatus.shatibiyyah.savedAt).toLocaleString('ar-SA')}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => handleSaveKnowledgeBookOffline('shatibiyyah')}
+                disabled={savingBooks}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-200 text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <HardDriveDownload className="w-3.5 h-3.5" />
+                <span>تثبيت نسخة الشاطبية أوفلاين</span>
+              </button>
+              <button
+                onClick={() => handleExportStandaloneBook('shatibiyyah')}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <Download className="w-3.5 h-3.5 text-teal-400" />
+                <span>تحميل ملف الشاطبية المستقل (HTML)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Jazariyyah Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-amber-500/25 flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-amber-300 font-bold text-sm">
+                  <BookMarked className="w-4 h-4 shrink-0" />
+                  <span>متن المقدمة الجزرية</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                  جاهز أوفلاين
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {booksStatus?.jazariyyah.chaptersCount || 4} أبواب • {booksStatus?.jazariyyah.itemsCount || 21} بيتاً مع مخارج الحروف والصفات والاستماع المتتتابع.
+              </p>
+              {booksStatus?.jazariyyah.savedAt && (
+                <p className="text-[11px] text-amber-400 font-semibold">
+                  آخر تثبيت محلي: {new Date(booksStatus.jazariyyah.savedAt).toLocaleString('ar-SA')}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => handleSaveKnowledgeBookOffline('jazariyyah')}
+                disabled={savingBooks}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-200 text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <HardDriveDownload className="w-3.5 h-3.5" />
+                <span>تثبيت نسخة الجزرية أوفلاين</span>
+              </button>
+              <button
+                onClick={() => handleExportStandaloneBook('jazariyyah')}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <Download className="w-3.5 h-3.5 text-amber-400" />
+                <span>تحميل ملف الجزرية المستقل (HTML)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Hisn Al-Muslim Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/80 border border-teal-500/25 flex flex-col justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-teal-300 font-bold text-sm">
+                  <Shield className="w-4 h-4 shrink-0" />
+                  <span>حصن المسلم</span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-teal-500/15 border border-teal-500/30 text-teal-300 text-[10px] font-bold">
+                  نصوص + صوتيات
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                {booksStatus?.hisn.chaptersCount || 6} أبواب • {booksStatus?.hisn.itemsCount || 28} ذكراً ودعاءً مأثوراً مع عداد التسبيح وتلاوة آية الكرسي والمعوذات.
+              </p>
+              <select
+                value={selectedHisnSheikhId}
+                onChange={(e) => setSelectedHisnSheikhId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-100 text-xs font-semibold min-h-[38px]"
+              >
+                {ADHKAR_SHEIKHS.map((sh) => (
+                  <option key={sh.id} value={sh.id}>
+                    {sh.name} — {sh.style}
+                  </option>
+                ))}
+              </select>
+              {booksStatus?.hisn.savedAt && (
+                <p className="text-[11px] text-teal-400 font-semibold">
+                  آخر تثبيت: {new Date(booksStatus.hisn.savedAt).toLocaleString('ar-SA')}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleDownloadHisnOfflineAudio}
+                disabled={Boolean(downloadingTitle) || savingBooks}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-white text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <HardDriveDownload className="w-3.5 h-3.5" />
+                <span>حفظ حصن المسلم + الصوتيات أوفلاين</span>
+              </button>
+              <button
+                onClick={() => handleExportStandaloneBook('hisn')}
+                className="flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-bold cursor-pointer min-h-[40px]"
+              >
+                <Download className="w-3.5 h-3.5 text-teal-400" />
+                <span>تحميل ملف حصن المسلم المستقل (HTML)</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

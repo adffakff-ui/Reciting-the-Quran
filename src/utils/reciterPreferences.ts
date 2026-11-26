@@ -191,18 +191,132 @@ export function formatSheikhOptionLabel(
   return `${prefix}${name} (${style})${suffix}`;
 }
 
+interface AndroidTTSInterface {
+  isAvailable?: () => boolean;
+  speak: (text: string, rate: number, pitch: number, token: string) => void;
+  stop: () => void;
+}
+
+declare global {
+  interface Window {
+    AndroidTTS?: AndroidTTSInterface;
+    __onAndroidTTSEnd?: (token: string) => void;
+    __onAndroidTTSError?: (token: string) => void;
+  }
+}
+
 let activeUtteranceRef: SpeechSynthesisUtterance | null = null;
 let speechSessionToken = 0;
 let pendingSpeakTimer: ReturnType<typeof setTimeout> | null = null;
+let timedFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+let timedFallbackRemainingMs = 0;
+let timedFallbackStartedAt = 0;
+let timedFallbackCallback: (() => void) | null = null;
+let androidTtsCallbacks: Map<string, { onEnd: () => void; onError: () => void }> = new Map();
+
+if (typeof window !== 'undefined') {
+  window.__onAndroidTTSEnd = (token: string) => {
+    const cb = androidTtsCallbacks.get(token);
+    if (cb) {
+      androidTtsCallbacks.delete(token);
+      cb.onEnd();
+    }
+  };
+  window.__onAndroidTTSError = (token: string) => {
+    const cb = androidTtsCallbacks.get(token);
+    if (cb) {
+      androidTtsCallbacks.delete(token);
+      cb.onError();
+    }
+  };
+}
 
 export interface SpeakArabicOptions {
   speedMultiplier?: number;
+  allowTimedFallback?: boolean;
+  onFallbackNotice?: (message: string) => void;
   onEnd?: () => void;
   onError?: () => void;
 }
 
+function clearTimedFallback(): void {
+  if (timedFallbackTimer !== null) {
+    clearTimeout(timedFallbackTimer);
+    timedFallbackTimer = null;
+  }
+  timedFallbackRemainingMs = 0;
+  timedFallbackStartedAt = 0;
+  timedFallbackCallback = null;
+}
+
+function splitArabicIntoSegments(cleanedText: string, maxLen = 150): string[] {
+  if (cleanedText.length <= maxLen) return [cleanedText];
+  const rawParts = cleanedText
+    .split(/(?<=[.،؛:!؟])\s+/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const merged: string[] = [];
+  let buffer = '';
+  for (const part of rawParts) {
+    if (!buffer) {
+      buffer = part;
+    } else if (buffer.length + part.length + 1 <= maxLen) {
+      buffer = `${buffer} ${part}`;
+    } else {
+      merged.push(buffer);
+      buffer = part;
+    }
+  }
+  if (buffer) merged.push(buffer);
+  return merged.length > 0 ? merged : [cleanedText];
+}
+
+function pickBestArabicVoice(): SpeechSynthesisVoice | null {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find(
+      (v) =>
+        v.lang.startsWith('ar') &&
+        (v.name.includes('Arabic') ||
+          v.name.includes('Natural') ||
+          v.name.includes('Maged') ||
+          v.name.includes('Tarık') ||
+          v.name.includes('Hoda') ||
+          v.name.includes('Naayf'))
+    ) ||
+    voices.find((v) => v.lang.startsWith('ar')) ||
+    null
+  );
+}
+
+function waitForVoicesBriefly(timeoutMs = 350): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      resolve();
+      return;
+    }
+    if (window.speechSynthesis.getVoices().length > 0) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      window.speechSynthesis.removeEventListener?.('voiceschanged', done);
+      resolve();
+    };
+    window.speechSynthesis.addEventListener?.('voiceschanged', done);
+    setTimeout(done, timeoutMs);
+  });
+}
+
 export function stopArabicSpeech(): void {
   speechSessionToken += 1;
+  clearTimedFallback();
+  androidTtsCallbacks.clear();
   if (pendingSpeakTimer !== null) {
     clearTimeout(pendingSpeakTimer);
     pendingSpeakTimer = null;
@@ -212,14 +326,25 @@ export function stopArabicSpeech(): void {
     activeUtteranceRef.onerror = null;
     activeUtteranceRef = null;
   }
-  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  if (typeof window !== 'undefined') {
     try {
-      window.speechSynthesis.cancel();
+      window.AndroidTTS?.stop?.();
     } catch {}
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {}
+    }
   }
 }
 
 export function pauseArabicSpeech(): void {
+  if (timedFallbackTimer !== null && timedFallbackStartedAt > 0) {
+    const elapsed = Date.now() - timedFallbackStartedAt;
+    timedFallbackRemainingMs = Math.max(300, timedFallbackRemainingMs - elapsed);
+    clearTimeout(timedFallbackTimer);
+    timedFallbackTimer = null;
+  }
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.pause();
@@ -228,6 +353,16 @@ export function pauseArabicSpeech(): void {
 }
 
 export function resumeArabicSpeech(): void {
+  if (timedFallbackCallback && timedFallbackRemainingMs > 0 && timedFallbackTimer === null) {
+    const cb = timedFallbackCallback;
+    timedFallbackStartedAt = Date.now();
+    timedFallbackTimer = setTimeout(() => {
+      timedFallbackTimer = null;
+      timedFallbackCallback = null;
+      timedFallbackRemainingMs = 0;
+      cb();
+    }, timedFallbackRemainingMs);
+  }
   if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
     try {
       window.speechSynthesis.resume();
@@ -246,52 +381,104 @@ export function speakArabicWithSheikh(
       ? { onEnd: onEndOrOptions, onError: onErrorArg }
       : onEndOrOptions || {};
 
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    options.onError?.();
-    return false;
+  const cleaned = text
+    .replace(/[۝۞۩﴿﴾]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) {
+    options.onEnd?.();
+    return true;
   }
 
+  const speedMul = options.speedMultiplier ?? 1.0;
+  const effectivePitch = Math.max(0.5, Math.min(2.0, sheikh.speechPitch || 1.0));
+  const effectiveRate = Math.max(0.5, Math.min(1.75, (sheikh.speechRate || 0.9) * speedMul));
+
+  const startTimedReadingFallback = (reason: string) => {
+    if (options.allowTimedFallback === false) {
+      options.onError?.();
+      return;
+    }
+    const myToken = speechSessionToken;
+    options.onFallbackNotice?.(reason);
+    const wordCount = Math.max(3, cleaned.split(/\s+/).length);
+    const durationMs = Math.max(2200, Math.min(18000, Math.round((wordCount * 420) / speedMul)));
+    timedFallbackRemainingMs = durationMs;
+    timedFallbackStartedAt = Date.now();
+    timedFallbackCallback = () => {
+      if (myToken !== speechSessionToken) return;
+      options.onEnd?.();
+    };
+    timedFallbackTimer = setTimeout(() => {
+      if (myToken !== speechSessionToken) return;
+      clearTimedFallback();
+      options.onEnd?.();
+    }, durationMs);
+  };
+
   try {
-    const wasActive =
-      window.speechSynthesis.speaking || window.speechSynthesis.pending;
+    const wasWebSpeechActive =
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      (window.speechSynthesis.speaking || window.speechSynthesis.pending);
+
     stopArabicSpeech();
     const myToken = speechSessionToken;
 
-    const startUtterance = () => {
-      if (myToken !== speechSessionToken) return;
-      const cleaned = text
-        .replace(/[۝۞۩﴿﴾]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim();
+    // Tier 1: Native Android Offline TextToSpeech inside APK
+    if (typeof window !== 'undefined' && window.AndroidTTS?.isAvailable?.()) {
+      const tokenStr = `utt_${myToken}_${Date.now()}`;
+      androidTtsCallbacks.set(tokenStr, {
+        onEnd: () => {
+          if (myToken !== speechSessionToken) return;
+          options.onEnd?.();
+        },
+        onError: () => {
+          if (myToken !== speechSessionToken) return;
+          startTimedReadingFallback('تعذر النطق التلقائي عبر النظام، تم تفعيل وضع القراءة المتتابعة المرئية بدون إنترنت.');
+        },
+      });
+      window.AndroidTTS.speak(cleaned, effectiveRate, effectivePitch, tokenStr);
+      return true;
+    }
 
-      if (!cleaned) {
+    // Tier 2: Web Speech Synthesis API
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      startTimedReadingFallback('المتصفح لا يدعم محرك النطق، تم تفعيل التمرير والقراءة المرئية المتتابعة.');
+      return true;
+    }
+
+    const segments = splitArabicIntoSegments(cleaned);
+
+    const speakSegmentIndex = async (segIndex: number) => {
+      if (myToken !== speechSessionToken) return;
+      if (segIndex === 0 && window.speechSynthesis.getVoices().length === 0) {
+        await waitForVoicesBriefly(350);
+        if (myToken !== speechSessionToken) return;
+      }
+
+      if (segIndex >= segments.length) {
+        activeUtteranceRef = null;
         options.onEnd?.();
         return;
       }
 
-      const utterance = new SpeechSynthesisUtterance(cleaned);
+      const utterance = new SpeechSynthesisUtterance(segments[segIndex]);
       utterance.lang = 'ar-SA';
-
-      const voices = window.speechSynthesis.getVoices();
-      const arabicVoice =
-        voices.find(
-          (v) =>
-            v.lang.startsWith('ar') &&
-            (v.name.includes('Arabic') ||
-              v.name.includes('Natural') ||
-              v.name.includes('Maged') ||
-              v.name.includes('Tarık'))
-        ) || voices.find((v) => v.lang.startsWith('ar'));
-
+      const arabicVoice = pickBestArabicVoice();
       if (arabicVoice) utterance.voice = arabicVoice;
-      const speedMul = options.speedMultiplier ?? 1.0;
-      utterance.pitch = Math.max(0.5, Math.min(2.0, sheikh.speechPitch || 1.0));
-      utterance.rate = Math.max(0.5, Math.min(1.75, (sheikh.speechRate || 0.9) * speedMul));
+      utterance.pitch = effectivePitch;
+      utterance.rate = effectiveRate;
 
       utterance.onend = () => {
         if (myToken !== speechSessionToken) return;
         activeUtteranceRef = null;
-        options.onEnd?.();
+        if (segIndex + 1 < segments.length) {
+          void speakSegmentIndex(segIndex + 1);
+        } else {
+          options.onEnd?.();
+        }
       };
 
       utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
@@ -300,25 +487,27 @@ export function speakArabicWithSheikh(
           return;
         }
         activeUtteranceRef = null;
-        options.onError?.();
+        startTimedReadingFallback(
+          'محرك الصوت غير متاح حالياً (قد يتطلب تثبيت حزمة الصوت العربية في الجهاز)، وتم تفعيل التتابع المرئي.'
+        );
       };
 
       activeUtteranceRef = utterance;
       window.speechSynthesis.speak(utterance);
     };
 
-    if (wasActive) {
+    if (wasWebSpeechActive) {
       pendingSpeakTimer = setTimeout(() => {
         pendingSpeakTimer = null;
-        startUtterance();
+        void speakSegmentIndex(0);
       }, 45);
     } else {
-      startUtterance();
+      void speakSegmentIndex(0);
     }
 
     return true;
   } catch {
-    options.onError?.();
-    return false;
+    startTimedReadingFallback('تعذر تشغيل الصوت، تم تفعيل القراءة المرئية المتتابعة.');
+    return true;
   }
 }

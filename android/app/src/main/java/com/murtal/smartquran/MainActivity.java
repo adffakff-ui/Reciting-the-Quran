@@ -8,7 +8,10 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.view.Window;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -32,6 +35,90 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private PermissionRequest pendingWebPermissionRequest;
+    private TextToSpeech tts;
+    private volatile boolean ttsReady = false;
+
+    private class AndroidTTSBridge {
+        @JavascriptInterface
+        public boolean isAvailable() {
+            return ttsReady && tts != null;
+        }
+
+        @JavascriptInterface
+        public void speak(final String text, final float rate, final float pitch, final String token) {
+            if (!ttsReady || tts == null || text == null || text.trim().isEmpty()) {
+                notifyJsTtsCallback("__onAndroidTTSError", token);
+                return;
+            }
+            final String safeToken = token != null ? token.replaceAll("[^a-zA-Z0-9_-]", "") : "utt";
+            runOnUiThread(() -> {
+                try {
+                    tts.setSpeechRate(Math.max(0.5f, Math.min(2.0f, rate)));
+                    tts.setPitch(Math.max(0.5f, Math.min(2.0f, pitch)));
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, safeToken);
+                } catch (Exception e) {
+                    notifyJsTtsCallback("__onAndroidTTSError", safeToken);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void stop() {
+            if (tts == null) return;
+            runOnUiThread(() -> {
+                try {
+                    tts.stop();
+                } catch (Exception ignored) {
+                }
+            });
+        }
+    }
+
+    private void notifyJsTtsCallback(final String fnName, final String token) {
+        if (webView == null) return;
+        final String safeToken = token != null ? token.replaceAll("[^a-zA-Z0-9_-]", "") : "";
+        runOnUiThread(() -> {
+            if (webView != null) {
+                webView.evaluateJavascript(
+                        "window." + fnName + " && window." + fnName + "('" + safeToken + "');",
+                        null
+                );
+            }
+        });
+    }
+
+    private void initAndroidTts() {
+        try {
+            tts = new TextToSpeech(this, status -> {
+                if (status == TextToSpeech.SUCCESS && tts != null) {
+                    int langResult = tts.setLanguage(new Locale("ar", "SA"));
+                    if (langResult == TextToSpeech.LANG_MISSING_DATA || langResult == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        langResult = tts.setLanguage(new Locale("ar"));
+                    }
+                    ttsReady = (langResult != TextToSpeech.LANG_MISSING_DATA && langResult != TextToSpeech.LANG_NOT_SUPPORTED);
+                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override
+                        public void onStart(String utteranceId) {
+                        }
+
+                        @Override
+                        public void onDone(String utteranceId) {
+                            notifyJsTtsCallback("__onAndroidTTSEnd", utteranceId);
+                        }
+
+                        @Override
+                        public void onError(String utteranceId) {
+                            notifyJsTtsCallback("__onAndroidTTSError", utteranceId);
+                        }
+                    });
+                } else {
+                    ttsReady = false;
+                }
+            });
+        } catch (Exception e) {
+            ttsReady = false;
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -43,6 +130,8 @@ public class MainActivity extends Activity {
             window.setStatusBarColor(Color.parseColor("#020617"));
             window.setNavigationBarColor(Color.parseColor("#020617"));
         }
+
+        initAndroidTts();
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#020617"));
@@ -59,6 +148,8 @@ public class MainActivity extends Activity {
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+
+        webView.addJavascriptInterface(new AndroidTTSBridge(), "AndroidTTS");
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -218,6 +309,14 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (tts != null) {
+            try {
+                tts.stop();
+                tts.shutdown();
+            } catch (Exception ignored) {
+            }
+            tts = null;
+        }
         if (webView != null) {
             webView.destroy();
         }

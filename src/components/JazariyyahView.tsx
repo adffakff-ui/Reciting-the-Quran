@@ -24,8 +24,13 @@ import {
   Gauge,
   ListOrdered,
 } from 'lucide-react';
+import { HardDriveDownload, Download } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
+import {
+  exportStandaloneOfflineBookHtml,
+  saveKnowledgeBookOfflineSnapshot,
+} from '../utils/offlineStorage';
 import {
   RECITER_PREFERENCES_EVENT,
   formatSheikhOptionLabel,
@@ -73,6 +78,8 @@ export const JazariyyahView: React.FC = () => {
   const [autoContinue, setAutoContinue] = useState(true);
   const [readExplanation, setReadExplanation] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [audioNotice, setAudioNotice] = useState<string | null>(null);
+  const [offlineStatusNotice, setOfflineStatusNotice] = useState<string | null>(null);
   const [favoriteReciterIds, setFavoriteReciterIds] = useState<string[]>(() => getReciterPreferences().favoriteReciterIds);
   const [selectedSheikh, setSelectedSheikh] = useState<AdhkarSheikh>(() =>
     getSheikhById(getReciterPreferences().defaultJazariyyahSheikhId)
@@ -294,6 +301,7 @@ export const JazariyyahView: React.FC = () => {
 
     speakArabicWithSheikh(spokenText, activeSheikh, {
       speedMultiplier: playbackSpeedRef.current,
+      onFallbackNotice: (msg) => setAudioNotice(msg),
       onEnd: () => {
         if (isCancelledRef.current) return;
         const shouldContinue = continuousMode || autoContinueRef.current;
@@ -448,17 +456,23 @@ export const JazariyyahView: React.FC = () => {
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => handleSpeakBayt(bayt)}
-              className={`p-2 rounded-xl border cursor-pointer min-h-[34px] min-w-[34px] flex items-center justify-center ${
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold cursor-pointer min-h-[34px] transition-colors ${
                 speakingBaytId === bayt.id
                   ? 'bg-amber-500/20 border-amber-400/60 text-amber-300'
-                  : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                  : 'bg-slate-900 border-slate-700 text-emerald-300 hover:text-white hover:border-emerald-500/40'
               }`}
               title={speakingBaytId === bayt.id ? 'إيقاف القراءة' : 'استماع للبيت'}
             >
               {speakingBaytId === bayt.id ? (
-                <Square className="w-3.5 h-3.5 fill-current" />
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                  <span>إيقاف</span>
+                </>
               ) : (
-                <Volume2 className="w-3.5 h-3.5" />
+                <>
+                  <Volume2 className="w-3.5 h-3.5" />
+                  <span>استماع</span>
+                </>
               )}
             </button>
 
@@ -552,6 +566,57 @@ export const JazariyyahView: React.FC = () => {
               <span className="text-[11px] text-slate-400">للمراجعة</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Audio / Offline Status Notices */}
+      {audioNotice && (
+        <div className="p-3 rounded-xl bg-amber-950/60 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between gap-2">
+          <span>{audioNotice}</span>
+          <button onClick={() => setAudioNotice(null)} className="text-amber-300 font-bold px-2 cursor-pointer">✕</button>
+        </div>
+      )}
+      {offlineStatusNotice && (
+        <div className="p-3 rounded-xl bg-emerald-950/70 border border-emerald-500/40 text-emerald-200 text-xs flex items-center justify-between gap-2">
+          <span>{offlineStatusNotice}</span>
+          <button onClick={() => setOfflineStatusNotice(null)} className="text-emerald-300 font-bold px-2 cursor-pointer">✕</button>
+        </div>
+      )}
+
+      {/* Offline Version Strip */}
+      <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-emerald-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+            <CheckCircle2 className="w-4 h-4" />
+          </div>
+          <div>
+            <p className="text-xs sm:text-sm font-bold text-white">نسخة متن الجزرية للعمل بدون إنترنت</p>
+            <p className="text-[11px] text-slate-400">
+              الأبيات وخريطة المخارج والصفات والاستماع الصوتي متاحة بدون إنترنت، مع إمكانية تنزيل نسخة مستقلة على جهازك.
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={async () => {
+              await saveKnowledgeBookOfflineSnapshot('jazariyyah');
+              setOfflineStatusNotice('تم تثبيت وحفظ نسخة متن الجزرية في ذاكرة الجهاز للعمل 100% بدون إنترنت.');
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold cursor-pointer min-h-[38px]"
+          >
+            <HardDriveDownload className="w-3.5 h-3.5" />
+            <span>حفظ نسخة أوفلاين</span>
+          </button>
+          <button
+            onClick={() => {
+              const fname = exportStandaloneOfflineBookHtml('jazariyyah');
+              setOfflineStatusNotice(`تم تنزيل كتاب الجزرية الأوفلاين المستقل (${fname}) مع مشغل استماع مدمج.`);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 border border-amber-500/40 text-amber-300 text-xs font-bold cursor-pointer min-h-[38px]"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>تحميل نسخة مستقلة (HTML)</span>
+          </button>
         </div>
       </div>
 

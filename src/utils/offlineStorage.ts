@@ -1,9 +1,13 @@
 import { QURAN_SURAHS, RECITERS, Surah, getReciterAyahAudioUrl, getReciterBasmalahAudioUrl } from '../data/quranData';
 import { ADHKAR_LIST, ADHKAR_SHEIKHS, AdhkarSheikh } from '../data/adhkarData';
+import { SHATIBIYYAH_CHAPTERS, SHATIBIYYAH_SYMBOLS, SEVEN_QURRA } from '../data/shatibiyyahData';
+import { JAZARIYYAH_CHAPTERS, MAKHARIJ_GROUPS, SIFAT_OPPOSITES, SIFAT_NON_OPPOSITES } from '../data/jazariyyahData';
+import { HISN_CATEGORIES } from '../data/hisnAlMuslimData';
 
 export const APP_VERSION = '1.1.0';
 export const APP_VERSION_CODE = 110;
 export const AUDIO_CACHE_NAME = 'quran-audio-cache';
+export const BOOKS_CACHE_NAME = 'murtal-offline-books-v1';
 const IDB_NAME = 'murtal_offline_db';
 const IDB_VERSION = 1;
 const SNAPSHOTS_STORE = 'snapshots';
@@ -55,7 +59,7 @@ export interface LocalSnapshot extends BackupPayload {
 
 export interface OfflineAudioPack {
   id: string;
-  type: 'surah' | 'adhkar' | 'mushaf' | 'juz';
+  type: 'surah' | 'adhkar' | 'mushaf' | 'juz' | 'shatibiyyah' | 'jazariyyah' | 'hisn';
   title: string;
   subtitle: string;
   reciterName: string;
@@ -64,6 +68,16 @@ export interface OfflineAudioPack {
   completedCount?: number;
   isComplete?: boolean;
   savedAt: string;
+}
+
+export type OfflineBookKey = 'shatibiyyah' | 'jazariyyah' | 'hisn';
+
+export interface KnowledgeBookOfflineStatus {
+  saved: boolean;
+  itemsCount: number;
+  chaptersCount: number;
+  savedAt?: string;
+  audioCachedCount?: number;
 }
 
 export interface ReciterOfflineCoverage {
@@ -727,4 +741,398 @@ export function getPopularOfflineSurahs(): Surah[] {
   return popularNumbers
     .map((num) => QURAN_SURAHS.find((s) => s.number === num))
     .filter((s): s is Surah => Boolean(s));
+}
+
+export function getHisnSheikhAudioUrls(sheikh: AdhkarSheikh): string[] {
+  const urls: string[] = [];
+  if (sheikh.everyayahFolder) {
+    // Ayat Al-Kursi (hw_4) + Al-Ikhlas + Al-Falaq + Al-Nas
+    urls.push(`https://everyayah.com/data/${sheikh.everyayahFolder}/002255.mp3`);
+    for (let a = 1; a <= 4; a++) urls.push(`https://everyayah.com/data/${sheikh.everyayahFolder}/11200${a}.mp3`);
+    for (let a = 1; a <= 5; a++) urls.push(`https://everyayah.com/data/${sheikh.everyayahFolder}/11300${a}.mp3`);
+    for (let a = 1; a <= 6; a++) urls.push(`https://everyayah.com/data/${sheikh.everyayahFolder}/11400${a}.mp3`);
+  } else {
+    const bitrate = sheikh.bitrate || 128;
+    urls.push(`https://cdn.islamic.network/quran/audio/${bitrate}/${sheikh.subfolder}/262.mp3`);
+  }
+  return Array.from(new Set(urls));
+}
+
+export async function saveKnowledgeBookOfflineSnapshot(
+  target: OfflineBookKey | 'all'
+): Promise<Record<OfflineBookKey, KnowledgeBookOfflineStatus>> {
+  await requestPersistentStorage();
+
+  const keysToSave: OfflineBookKey[] =
+    target === 'all' ? ['shatibiyyah', 'jazariyyah', 'hisn'] : [target];
+
+  const savedAt = new Date().toISOString();
+
+  for (const key of keysToSave) {
+    let payload: unknown;
+    let packRecord: OfflineAudioPack;
+
+    if (key === 'shatibiyyah') {
+      const abyatCount = SHATIBIYYAH_CHAPTERS.reduce((s, c) => s + c.abyat.length, 0);
+      payload = {
+        book: 'shatibiyyah',
+        version: APP_VERSION,
+        savedAt,
+        chapters: SHATIBIYYAH_CHAPTERS,
+        symbols: SHATIBIYYAH_SYMBOLS,
+        qurra: SEVEN_QURRA,
+      };
+      packRecord = {
+        id: 'book_shatibiyyah_offline',
+        type: 'shatibiyyah',
+        title: 'متن الشاطبية كاملاً (نسخة أوفلاين)',
+        subtitle: `${SHATIBIYYAH_CHAPTERS.length} أبواب • ${abyatCount} بيتاً و${SHATIBIYYAH_SYMBOLS.length} رمزاً`,
+        reciterName: 'الشاطبية + القراءة الصوتية',
+        urls: [],
+        ayahCount: abyatCount,
+        completedCount: abyatCount,
+        isComplete: true,
+        savedAt,
+      };
+    } else if (key === 'jazariyyah') {
+      const abyatCount = JAZARIYYAH_CHAPTERS.reduce((s, c) => s + c.abyat.length, 0);
+      payload = {
+        book: 'jazariyyah',
+        version: APP_VERSION,
+        savedAt,
+        chapters: JAZARIYYAH_CHAPTERS,
+        makharij: MAKHARIJ_GROUPS,
+        sifatOpposites: SIFAT_OPPOSITES,
+        sifatNonOpposites: SIFAT_NON_OPPOSITES,
+      };
+      packRecord = {
+        id: 'book_jazariyyah_offline',
+        type: 'jazariyyah',
+        title: 'متن المقدمة الجزرية كاملاً (نسخة أوفلاين)',
+        subtitle: `${JAZARIYYAH_CHAPTERS.length} أبواب • ${abyatCount} بيتاً وخريطة المخارج والصفات`,
+        reciterName: 'الجزرية + القراءة الصوتية',
+        urls: [],
+        ayahCount: abyatCount,
+        completedCount: abyatCount,
+        isComplete: true,
+        savedAt,
+      };
+    } else {
+      const itemsCount = HISN_CATEGORIES.reduce((s, c) => s + c.items.length, 0);
+      payload = {
+        book: 'hisn',
+        version: APP_VERSION,
+        savedAt,
+        categories: HISN_CATEGORIES,
+      };
+      packRecord = {
+        id: 'book_hisn_offline',
+        type: 'hisn',
+        title: 'حصن المسلم كاملاً (نسخة أوفلاين)',
+        subtitle: `${HISN_CATEGORIES.length} أبواب • ${itemsCount} ذكراً ودعاءً مأثوراً`,
+        reciterName: 'حصن المسلم + الصوتيات',
+        urls: [],
+        ayahCount: itemsCount,
+        completedCount: itemsCount,
+        isComplete: true,
+        savedAt,
+      };
+    }
+
+    try {
+      localStorage.setItem(`murtal_offline_book_${key}`, savedAt);
+    } catch {}
+
+    try {
+      if (typeof caches !== 'undefined') {
+        const cache = await caches.open(BOOKS_CACHE_NAME);
+        await cache.put(
+          `/offline-books/${key}.json`,
+          new Response(JSON.stringify(payload), {
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+          })
+        );
+      }
+    } catch {}
+
+    try {
+      await saveAudioPackRecord(packRecord);
+    } catch {}
+  }
+
+  return getKnowledgeBooksOfflineStatus();
+}
+
+export async function getKnowledgeBooksOfflineStatus(): Promise<
+  Record<OfflineBookKey, KnowledgeBookOfflineStatus>
+> {
+  const shatibiyyahCount = SHATIBIYYAH_CHAPTERS.reduce((s, c) => s + c.abyat.length, 0);
+  const jazariyyahCount = JAZARIYYAH_CHAPTERS.reduce((s, c) => s + c.abyat.length, 0);
+  const hisnCount = HISN_CATEGORIES.reduce((s, c) => s + c.items.length, 0);
+
+  const packs = await listOfflineAudioPacks();
+  const findSavedAt = (key: OfflineBookKey) => {
+    const pack = packs.find((p) => p.type === key);
+    if (pack?.savedAt) return pack.savedAt;
+    try {
+      return localStorage.getItem(`murtal_offline_book_${key}`) || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  let hisnAudioCached = 0;
+  try {
+    if (typeof caches !== 'undefined') {
+      const cache = await caches.open(AUDIO_CACHE_NAME);
+      const keys = await cache.keys();
+      hisnAudioCached = keys.filter((req) => req.url.includes('002255.mp3')).length;
+    }
+  } catch {}
+
+  const shSavedAt = findSavedAt('shatibiyyah');
+  const jazSavedAt = findSavedAt('jazariyyah');
+  const hisnSavedAt = findSavedAt('hisn');
+
+  // All 3 texts are also compiled directly in the local bundle, so when saved or bundled they work 100% offline
+  return {
+    shatibiyyah: {
+      saved: Boolean(shSavedAt) || true,
+      itemsCount: shatibiyyahCount,
+      chaptersCount: SHATIBIYYAH_CHAPTERS.length,
+      savedAt: shSavedAt,
+    },
+    jazariyyah: {
+      saved: Boolean(jazSavedAt) || true,
+      itemsCount: jazariyyahCount,
+      chaptersCount: JAZARIYYAH_CHAPTERS.length,
+      savedAt: jazSavedAt,
+    },
+    hisn: {
+      saved: Boolean(hisnSavedAt) || true,
+      itemsCount: hisnCount,
+      chaptersCount: HISN_CATEGORIES.length,
+      savedAt: hisnSavedAt,
+      audioCachedCount: hisnAudioCached,
+    },
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function exportStandaloneOfflineBookHtml(target: OfflineBookKey | 'all'): string {
+  const sections: string[] = [];
+
+  if (target === 'all' || target === 'shatibiyyah') {
+    const chaptersHtml = SHATIBIYYAH_CHAPTERS.map(
+      (ch) => `
+      <section class="chapter">
+        <h2>${escapeHtml(ch.title)} <small>(${escapeHtml(ch.range)})</small></h2>
+        <p class="desc">${escapeHtml(ch.description)}</p>
+        ${ch.abyat
+          .map(
+            (b) => `
+          <article class="card playable" data-speech="${escapeHtml(`${b.sadr}، ${b.ajuz}`)}">
+            <div class="card-head">
+              <span class="badge">بيت ${b.number}</span>
+              <button type="button" class="listen-btn" onclick="playCard(this)">🔊 استماع</button>
+            </div>
+            <div class="bayt-grid">
+              <p class="verse">${escapeHtml(b.sadr)}</p>
+              <p class="verse">${escapeHtml(b.ajuz)}</p>
+            </div>
+            <p class="rule"><strong>القاعدة:</strong> ${escapeHtml(b.ruleSummary)}</p>
+            <p class="exp">${escapeHtml(b.explanation)}</p>
+          </article>`
+          )
+          .join('')}
+      </section>`
+    ).join('');
+    sections.push(`<div class="book"><h1>متن الشاطبية — حرز الأماني ووجه التهاني</h1>${chaptersHtml}</div>`);
+  }
+
+  if (target === 'all' || target === 'jazariyyah') {
+    const chaptersHtml = JAZARIYYAH_CHAPTERS.map(
+      (ch) => `
+      <section class="chapter">
+        <h2>${escapeHtml(ch.title)} <small>(${escapeHtml(ch.range)})</small></h2>
+        <p class="desc">${escapeHtml(ch.description)}</p>
+        ${ch.abyat
+          .map(
+            (b) => `
+          <article class="card playable" data-speech="${escapeHtml(`${b.sadr}، ${b.ajuz}`)}">
+            <div class="card-head">
+              <span class="badge">بيت ${b.number}</span>
+              <button type="button" class="listen-btn" onclick="playCard(this)">🔊 استماع</button>
+            </div>
+            <div class="bayt-grid">
+              <p class="verse">${escapeHtml(b.sadr)}</p>
+              <p class="verse">${escapeHtml(b.ajuz)}</p>
+            </div>
+            <p class="rule"><strong>الحكم:</strong> ${escapeHtml(b.ruleSummary)}</p>
+            <p class="exp">${escapeHtml(b.explanation)}</p>
+          </article>`
+          )
+          .join('')}
+      </section>`
+    ).join('');
+    sections.push(`<div class="book"><h1>متن المقدمة الجزرية في علم التجويد</h1>${chaptersHtml}</div>`);
+  }
+
+  if (target === 'all' || target === 'hisn') {
+    const catsHtml = HISN_CATEGORIES.map(
+      (cat) => `
+      <section class="chapter">
+        <h2>${escapeHtml(cat.title)}</h2>
+        <p class="desc">${escapeHtml(cat.subtitle)}</p>
+        ${cat.items
+          .map(
+            (it) => `
+          <article class="card playable" data-speech="${escapeHtml(`${it.title}. ${it.text}`)}">
+            <div class="card-head">
+              <span class="badge">${it.count}× • ${escapeHtml(it.title)}</span>
+              <button type="button" class="listen-btn" onclick="playCard(this)">🔊 استماع</button>
+            </div>
+            <p class="dhikr">${escapeHtml(it.text)}</p>
+            <p class="rule"><strong>المصدر:</strong> ${escapeHtml(it.reference)}</p>
+            ${it.virtue ? `<p class="exp"><strong>الفضل:</strong> ${escapeHtml(it.virtue)}</p>` : ''}
+          </article>`
+          )
+          .join('')}
+      </section>`
+    ).join('');
+    sections.push(`<div class="book"><h1>حصن المسلم — أذكار الكتاب والسنة</h1>${catsHtml}</div>`);
+  }
+
+  const titleMap: Record<OfflineBookKey | 'all', string> = {
+    shatibiyyah: 'متن الشاطبية — نسخة بدون إنترنت',
+    jazariyyah: 'متن الجزرية — نسخة بدون إنترنت',
+    hisn: 'حصن المسلم — نسخة بدون إنترنت',
+    all: 'مكتبة الشاطبية والجزرية وحصن المسلم — نسخة بدون إنترنت',
+  };
+
+  const filenameMap: Record<OfflineBookKey | 'all', string> = {
+    shatibiyyah: `murtal-shatibiyyah-v${APP_VERSION}-offline.html`,
+    jazariyyah: `murtal-jazariyyah-v${APP_VERSION}-offline.html`,
+    hisn: `murtal-hisn-al-muslim-v${APP_VERSION}-offline.html`,
+    all: `murtal-books-bundle-v${APP_VERSION}-offline.html`,
+  };
+
+  const html = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>${escapeHtml(titleMap[target])}</title>
+<style>
+  body { margin:0; font-family: system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif; background:#020617; color:#f1f5f9; line-height:1.8; }
+  .wrap { max-width:960px; margin:0 auto; padding:20px 14px 60px; }
+  header { background:linear-gradient(135deg,#064e3b,#0f172a); border:1px solid #10b98155; border-radius:20px; padding:20px; margin-bottom:20px; }
+  header h1 { margin:0 0 8px; font-size:1.5rem; color:#fff; }
+  header p { margin:0; font-size:0.9rem; color:#cbd5e1; }
+  .controls { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  button { cursor:pointer; border:none; border-radius:12px; padding:10px 16px; font-weight:bold; font-size:0.85rem; }
+  .btn-primary { background:#10b981; color:#fff; }
+  .btn-stop { background:#e11d48; color:#fff; }
+  .listen-btn { background:#1e293b; color:#6ee7b7; border:1px solid #10b98155; padding:6px 12px; }
+  .book { margin-top:24px; }
+  .book > h1 { font-size:1.4rem; color:#34d399; border-bottom:2px solid #10b98144; padding-bottom:8px; }
+  .chapter h2 { font-size:1.15rem; color:#fbbf24; margin:20px 0 6px; }
+  .desc { color:#94a3b8; font-size:0.85rem; margin:0 0 12px; }
+  .card { background:#0f172a; border:1px solid #1e293b; border-radius:16px; padding:16px; margin-bottom:12px; }
+  .card.active { border-color:#fbbf24; box-shadow:0 0 0 2px #fbbf2444; background:#064e3b33; }
+  .card-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; }
+  .badge { background:#065f46; color:#a7f3d0; padding:4px 10px; border-radius:8px; font-size:0.8rem; font-weight:bold; }
+  .bayt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; background:#020617; padding:12px; border-radius:12px; text-align:center; }
+  .verse, .dhikr { font-size:1.25rem; font-weight:bold; color:#fff; margin:4px 0; }
+  .rule { color:#6ee7b7; font-size:0.88rem; margin:10px 0 4px; }
+  .exp { color:#cbd5e1; font-size:0.85rem; margin:0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>${escapeHtml(titleMap[target])}</h1>
+    <p>مُرَتِّل القرآن الذكي • الإصدار ${APP_VERSION} • نسخة مكتفية ذاتياً تعمل بدون إنترنت مع الاستماع المتتتابع</p>
+    <div class="controls">
+      <button type="button" class="btn-primary" onclick="playAllSequential()">▶ تشغيل متتتابع للجميع</button>
+      <button type="button" class="btn-stop" onclick="stopAll()">■ إيقاف الصوت</button>
+    </div>
+  </header>
+  ${sections.join('\n')}
+</div>
+<script>
+  var seqActive = false;
+  var cards = [];
+  function speakText(text, onDone) {
+    if (!('speechSynthesis' in window)) {
+      setTimeout(onDone, 2500);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text);
+    u.lang = 'ar-SA';
+    u.rate = 0.92;
+    u.onend = onDone;
+    u.onerror = function() { setTimeout(onDone, 2000); };
+    window.speechSynthesis.speak(u);
+  }
+  function clearActive() {
+    document.querySelectorAll('.card.active').forEach(function(el){ el.classList.remove('active'); });
+  }
+  function stopAll() {
+    seqActive = false;
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    clearActive();
+  }
+  function playCard(btn) {
+    stopAll();
+    var card = btn.closest('.card');
+    if (!card) return;
+    card.classList.add('active');
+    speakText(card.getAttribute('data-speech') || '', function() {
+      card.classList.remove('active');
+    });
+  }
+  function playIndex(idx) {
+    if (!seqActive || idx >= cards.length) {
+      stopAll();
+      return;
+    }
+    clearActive();
+    var card = cards[idx];
+    card.classList.add('active');
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    speakText(card.getAttribute('data-speech') || '', function() {
+      if (seqActive) setTimeout(function(){ playIndex(idx + 1); }, 350);
+    });
+  }
+  function playAllSequential() {
+    stopAll();
+    cards = Array.prototype.slice.call(document.querySelectorAll('.playable'));
+    if (!cards.length) return;
+    seqActive = true;
+    playIndex(0);
+  }
+</script>
+</body>
+</html>`;
+
+  const filename = filenameMap[target];
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
 }
